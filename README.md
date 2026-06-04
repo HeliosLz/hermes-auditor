@@ -17,4 +17,5 @@ AI × Web3 Agentic Builders Hackathon 参赛项目（主攻 Cobo 赛道）。
 
 ## 状态
 
-🚧 Day 1 — 搭建中。设计文档见学习仓库 `ai-web3-school-cohort-0/hackathon/ideation.md`。
+✅ Day 1（2026-06-04）— CAW 接入 + 首笔测试网交易跑通（带真人审批）。进度见 [PROGRESS.md](./PROGRESS.md)。
+设计文档见学习仓库 `ai-web3-school-cohort-0/hackathon/ideation.md`。
