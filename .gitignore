@@ -1,0 +1,19 @@
+# secrets — NEVER commit
+.env
+.env.*
+*.key
+**/credentials
+**/secrets.db
+.cobo-agentic-wallet/
+
+# python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# os / editor
+.DS_Store
+.idea/
+.vscode/
