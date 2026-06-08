@@ -12,10 +12,29 @@ AI × Web3 Agentic Builders Hackathon 参赛项目（主攻 Cobo 赛道）。
 ## 技术栈
 
 - 编排：LangGraph（FSM + HUMAN GATE via `interrupt` + 回放 via `checkpointer`）
-- Agent 脑：GLM-5.1（Z.AI General API）
+- 动态规划：Claude Dynamic Workflow（只做可逆准备，不直接执行 CAW）
 - 资金执行：Cobo Agentic Wallet（CAW，测试网 Sepolia / Base Sepolia / Solana Devnet）
 
 ## 状态
 
-✅ Day 1（2026-06-04）— CAW 接入 + 首笔测试网交易跑通（带真人审批）。进度见 [PROGRESS.md](./PROGRESS.md)。
+- ✅ Day 1（2026-06-04）— CAW 接入 + 首笔测试网交易跑通（带真人审批）。
+- ✅ Day 2（2026-06-06）— CAW policy 拦截跑通：错误收款地址被 `ADDRESS_NOT_WHITELISTED` 拒绝，未广播链上交易。
+- ✅ Day 3（2026-06-07）— `risk_summary` schema + fixtures 入项目。
+- ✅ Day 4（2026-06-08）— LangGraph tracer bullet 跑通：5 stub 节点 + 两条 fixture run 分别到 `DONE` / `STOPPED`，不接模型/CAW。
+
+## 运行
+
+```bash
+uv run hermes-auditor
+```
+
+跑两条 fixture 驱动的 run，打印各自的 `audit_log` 和终态：
+
+- `allow-normal-payment` → `PLAN_DYNAMIC_WORKFLOW → AUDIT(ALLOW) → HUMAN_GATE → CAW_EXECUTE → DONE`
+- `reject-wrong-recipient` → `PLAN_DYNAMIC_WORKFLOW → AUDIT(REJECT) → STOPPED`
+
+第一版只证明控制流：不调用 Claude，不调用 CAW。`CAW_EXECUTE` 用 2026-06-04 的测试网 tx hash 做 stub，`HUMAN_GATE` 用本地 auto-approval 做 stub。
+
+进度见 [PROGRESS.md](./PROGRESS.md)。
+LangGraph 骨架见 [docs/langgraph-skeleton.md](./docs/langgraph-skeleton.md)。
 设计文档见学习仓库 `ai-web3-school-cohort-0/hackathon/ideation.md`。

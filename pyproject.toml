@@ -1,0 +1,19 @@
+[project]
+name = "hermes-auditor"
+version = "0.1.0"
+description = "长程可审计 Agent：LangGraph 编排 + Auditor 把关 + Cobo Agentic Wallet 执行"
+authors = [
+    { name = "Helios", email = "heliosgopher@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "jsonschema>=4.26.0",
+    "langgraph>=1.2.4",
+]
+
+[project.scripts]
+hermes-auditor = "hermes_auditor:main"
+
+[build-system]
+requires = ["uv_build>=0.9.18,<0.10.0"]
+build-backend = "uv_build"

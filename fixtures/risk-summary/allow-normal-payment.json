@@ -1,0 +1,48 @@
+{
+  "summary_id": "rs_20260607_allow_normal_payment",
+  "created_at": "2026-06-07T10:00:00+08:00",
+  "user_intent": "用不超过 0.01 SETH_USDC1 采购一个 demo 数据源，用于验证 Agent Resource Procurement 流程。",
+  "scenario": "agent_resource_procurement",
+  "decision": "ALLOW",
+  "vendor": {
+    "name": "Demo Data API",
+    "claimed_url": "https://example.com/demo-data-api",
+    "address_source": "official_docs",
+    "address_source_confidence": "high"
+  },
+  "payment": {
+    "chain_id": 11155111,
+    "network": "sepolia",
+    "token": "SETH_USDC1",
+    "amount": "0.001",
+    "recipient_address": "0x23482606e068480f91cd7b1a6f775986a96081ba",
+    "budget_limit": "0.01"
+  },
+  "pact_policy": {
+    "allowed_recipients": [
+      "0x23482606e068480f91cd7b1a6f775986a96081ba"
+    ],
+    "max_amount": "0.001",
+    "max_transactions": 1,
+    "expires_at": "2026-06-08T00:00:00+08:00"
+  },
+  "checks": {
+    "address_matches_source": true,
+    "amount_within_budget": true,
+    "recipient_first_seen": true,
+    "policy_matches_summary": true,
+    "prompt_injection_detected": false
+  },
+  "red_flags": [
+    {
+      "severity": "none",
+      "message": "No material red flags for this demo payment."
+    }
+  ],
+  "bindings": {
+    "pact_id": null,
+    "calldata_hash": null,
+    "summary_hash": null,
+    "user_confirmation_id": null
+  }
+}

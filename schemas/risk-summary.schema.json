@@ -1,0 +1,247 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://example.local/hermes-auditor/schemas/risk-summary.schema.json",
+  "title": "Hermes Auditor Risk Summary",
+  "description": "A human-readable and machine-bindable summary for one CAW payment/procurement decision.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "summary_id",
+    "created_at",
+    "user_intent",
+    "scenario",
+    "decision",
+    "vendor",
+    "payment",
+    "pact_policy",
+    "checks",
+    "red_flags",
+    "bindings"
+  ],
+  "properties": {
+    "summary_id": {
+      "type": "string",
+      "pattern": "^rs_[0-9]{8}_[a-z0-9_\\-]+$"
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "user_intent": {
+      "type": "string",
+      "minLength": 1
+    },
+    "scenario": {
+      "type": "string",
+      "enum": [
+        "agent_resource_procurement",
+        "x402_payment"
+      ]
+    },
+    "decision": {
+      "type": "string",
+      "enum": [
+        "ALLOW",
+        "STOP_AND_REVIEW",
+        "REJECT"
+      ]
+    },
+    "vendor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "claimed_url",
+        "address_source",
+        "address_source_confidence"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "claimed_url": {
+          "type": "string",
+          "format": "uri"
+        },
+        "address_source": {
+          "type": "string",
+          "enum": [
+            "official_docs",
+            "user_input",
+            "agent_found",
+            "unknown"
+          ]
+        },
+        "address_source_confidence": {
+          "type": "string",
+          "enum": [
+            "high",
+            "medium",
+            "low"
+          ]
+        }
+      }
+    },
+    "payment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "chain_id",
+        "network",
+        "token",
+        "amount",
+        "recipient_address",
+        "budget_limit"
+      ],
+      "properties": {
+        "chain_id": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "network": {
+          "type": "string",
+          "minLength": 1
+        },
+        "token": {
+          "type": "string",
+          "minLength": 1
+        },
+        "amount": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "recipient_address": {
+          "type": "string",
+          "pattern": "^0x[a-fA-F0-9]{40}$"
+        },
+        "budget_limit": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        }
+      }
+    },
+    "pact_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "allowed_recipients",
+        "max_amount",
+        "max_transactions",
+        "expires_at"
+      ],
+      "properties": {
+        "allowed_recipients": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string",
+            "pattern": "^0x[a-fA-F0-9]{40}$"
+          }
+        },
+        "max_amount": {
+          "type": "string",
+          "pattern": "^[0-9]+(\\.[0-9]+)?$"
+        },
+        "max_transactions": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "expires_at": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "address_matches_source",
+        "amount_within_budget",
+        "recipient_first_seen",
+        "policy_matches_summary",
+        "prompt_injection_detected"
+      ],
+      "properties": {
+        "address_matches_source": {
+          "type": "boolean"
+        },
+        "amount_within_budget": {
+          "type": "boolean"
+        },
+        "recipient_first_seen": {
+          "type": "boolean"
+        },
+        "policy_matches_summary": {
+          "type": "boolean"
+        },
+        "prompt_injection_detected": {
+          "type": "boolean"
+        }
+      }
+    },
+    "red_flags": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "severity",
+          "message"
+        ],
+        "properties": {
+          "severity": {
+            "type": "string",
+            "enum": [
+              "none",
+              "low",
+              "medium",
+              "high"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pact_id",
+        "calldata_hash",
+        "summary_hash",
+        "user_confirmation_id"
+      ],
+      "properties": {
+        "pact_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "calldata_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "summary_hash": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "user_confirmation_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  }
+}
