@@ -11,9 +11,13 @@ AI × Web3 Agentic Builders Hackathon 参赛项目（主攻 Cobo 赛道）。
 
 ## 技术栈
 
-- 编排：LangGraph（FSM + HUMAN GATE via `interrupt` + 回放 via `checkpointer`）
-- 动态规划：Claude Dynamic Workflow（只做可逆准备，不直接执行 CAW）
-- 资金执行：Cobo Agentic Wallet（CAW，测试网 Sepolia / Base Sepolia / Solana Devnet）
+分两层编排，各归其层：
+
+- **外层骨架 = LangGraph**：确定性 FSM，持有 HUMAN GATE（`interrupt`）+ 回放（`checkpointer`）。**人闸在这一层** —— 不可逆资金动作前必须中途真人签字。
+- **PLAN 内层 = dynamic-workflow 模式**：在**可逆区**扇出 subagent 做发现 vendor / 起草 payment / adversarial 验证地址，只产出 `payment_draft`，**不碰 CAW、无中途人闸**。用 Anthropic API / Agent SDK 实现。
+- **资金执行 = Cobo Agentic Wallet**（CAW，测试网 Sepolia / Base Sepolia / Solana Devnet）。
+
+> 为什么人闸在 LangGraph、不在 dynamic workflow：Claude Code 的 [dynamic workflows](https://code.claude.com/docs/en/workflows) 明确**不支持中途人输入**（"No mid-run user input … run each stage as its own workflow"），而 Hermes 的命根正是不可逆动作前的真人签字。故 **人闸归 LangGraph，扇出规划归 PLAN 可逆区**。Hermes 作为独立 app 调不到 Claude Code 该 feature，PLAN 里重实现其 pattern（fan-out + adversarial verify），并用 quarantine —— 给读不可信内容的 subagent 一个不含动钱工具的 allowlist。
 
 ## 状态
 
