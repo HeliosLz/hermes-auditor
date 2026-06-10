@@ -54,6 +54,9 @@ class PlanResult:
     verdicts: list[RefuterVerdict] = field(default_factory=list)
     blocked: bool = False
     trace: list[str] = field(default_factory=list)
+    # 决策者审计:真脑模式下共发起几次 agent 调用、其中几次回退了 stub(0=全真脑)。
+    brain_calls: int = 0
+    brain_fallbacks: int = 0
 
 
 # 对抗验证的镜头:perspective-diverse,各抓一类失败模式。

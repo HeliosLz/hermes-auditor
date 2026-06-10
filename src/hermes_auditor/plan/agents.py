@@ -20,6 +20,10 @@ from .types import Confidence, RefuterVerdict, SourceFinding, SourceType
 
 _ADDR_RE = re.compile(r"0x[a-fA-F0-9]{40}")
 
+# 回退标记:真脑失败回退 stub 时打进 notes/reason;pipeline 数它浮出到审计日志。
+# 可审计的底线:证据必须记录「这个判断是谁做的」,回退不能静默。
+FALLBACK_MARK = "gpt-5.5 失败回退 stub"
+
 # 注入话术特征(stub 版;真脑由模型判断)
 _INJECTION_MARKERS = (
     "NOTE FOR AI",
@@ -100,7 +104,7 @@ def run_source_agent(label: str, source_type: SourceType, doc: str) -> SourceFin
             return _model_source_agent(label, source_type, doc)
         except Exception as e:  # 网关抽风 → 回退 stub(live demo 兜底)
             f = _stub_source_agent(label, source_type, doc)
-            f.notes = f"[gpt-5.5 失败回退 stub: {type(e).__name__}] " + f.notes
+            f.notes = f"[{FALLBACK_MARK}: {type(e).__name__}] " + f.notes
             return f
     return _stub_source_agent(label, source_type, doc)
 
@@ -154,6 +158,6 @@ def run_refuter(
             return _model_refuter(lens, candidate, doc, authoritative, allowlist)
         except Exception as e:  # 网关抽风 → 回退 stub
             v = _stub_refuter(lens, candidate, doc, authoritative, allowlist)
-            v.reason = f"[gpt-5.5 失败回退 stub: {type(e).__name__}] " + v.reason
+            v.reason = f"[{FALLBACK_MARK}: {type(e).__name__}] " + v.reason
             return v
     return _stub_refuter(lens, candidate, doc, authoritative, allowlist)

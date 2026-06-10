@@ -13,6 +13,15 @@ from .types import LENSES, PlanResult, RefuterVerdict, Source, SourceFinding
 _AUTHORITATIVE = ("official_docs", "registry", "user_input")
 
 
+def _count_fallbacks(findings: list[SourceFinding], verdicts: list[RefuterVerdict]) -> tuple[int, int]:
+    """数「这次 PLAN 的判断是谁做的」:(总调用数, 其中回退 stub 的次数)。"""
+    calls = len(findings) + len(verdicts)
+    fallbacks = sum(agents.FALLBACK_MARK in f.notes for f in findings) + sum(
+        agents.FALLBACK_MARK in v.reason for v in verdicts
+    )
+    return calls, fallbacks
+
+
 def _synthesize(findings: list[SourceFinding]) -> tuple[str | None, str | None]:
     """代码层比对:选权威地址 + 检出冲突候选。不交给某个 agent 自己拍板。"""
     authoritative = next(
@@ -73,6 +82,7 @@ def plan_dynamic_workflow(
     chosen = authoritative or suspicious
     if chosen is None:
         trace.append("[assemble] 无任何地址 → 证据不足")
+        calls, fallbacks = _count_fallbacks(findings, [])
         return PlanResult(
             user_intent=user_intent,
             candidate_vendor={"name": vendor_name},
@@ -81,6 +91,8 @@ def plan_dynamic_workflow(
             suspicious_candidate=None,
             blocked=True,
             trace=trace,
+            brain_calls=calls,
+            brain_fallbacks=fallbacks,
         )
 
     # chosen 对应的材料(给 injection 镜头看)
@@ -103,6 +115,10 @@ def plan_dynamic_workflow(
         payment_draft = {**payment_template, "recipient_address": chosen}
         trace.append(f"[assemble] payment_draft 就绪 → recipient={chosen}")
 
+    calls, fallbacks = _count_fallbacks(findings, verdicts)
+    if fallbacks:
+        trace.append(f"[brain] ⚠ {fallbacks}/{calls} 次调用回退 stub(网关失败)")
+
     return PlanResult(
         user_intent=user_intent,
         candidate_vendor={"name": vendor_name, "address_source": _source_of(findings, chosen)},
@@ -112,6 +128,8 @@ def plan_dynamic_workflow(
         verdicts=verdicts,
         blocked=blocked,
         trace=trace,
+        brain_calls=calls,
+        brain_fallbacks=fallbacks,
     )
 
 

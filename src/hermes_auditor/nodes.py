@@ -19,6 +19,7 @@ from typing import Any
 from langgraph.types import interrupt
 
 from . import caw
+from .plan import llm as plan_llm
 from .plan import plan_dynamic_workflow as _run_plan_pipeline
 from .plan.types import Source
 from .state import AuditDecision, HermesState
@@ -66,10 +67,20 @@ def plan_dynamic_workflow(state: HermesState) -> dict[str, Any]:
             "suspicious_candidate": result.suspicious_candidate,
             "verdicts": [{"lens": v.lens, "refuted": v.refuted, "reason": v.reason} for v in result.verdicts],
             "blocked": result.blocked,
+            # 决策者审计:这次 PLAN 的判断是谁做的(回退不能静默)。
+            "brain": plan_llm.BRAIN,
+            "brain_calls": result.brain_calls,
+            "brain_fallbacks": result.brain_fallbacks,
         },
         "error": None,
     }
-    out.update(_log("PLAN_DYNAMIC_WORKFLOW", f"blocked={result.blocked} recipient={recipient}"))
+    detail = f"blocked={result.blocked} recipient={recipient}"
+    if plan_llm.use_model():
+        if result.brain_fallbacks:
+            detail += f" brain={plan_llm.BRAIN} ⚠{result.brain_fallbacks}/{result.brain_calls} 回退 stub"
+        else:
+            detail += f" brain={plan_llm.BRAIN} 全真脑 {result.brain_calls} 次"
+    out.update(_log("PLAN_DYNAMIC_WORKFLOW", detail))
     return out
 
 
