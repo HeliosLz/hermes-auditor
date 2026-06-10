@@ -35,7 +35,11 @@ def _route_after_caw(state: HermesState) -> str:
     return "DONE" if state["caw_result"].get("status") == "SUCCESS" else "STOPPED"
 
 
-def build_graph():
+def build_graph(checkpointer=None):
+    """checkpointer:HUMAN_GATE 的 `interrupt` 需要它才能暂停/恢复(也是回放的脊椎)。
+
+    不传则无 checkpoint(旧行为)。run_tracer 默认传 MemorySaver,invoke 带 thread_id。
+    """
     g = StateGraph(HermesState)
 
     g.add_node("PLAN_DYNAMIC_WORKFLOW", nodes.plan_dynamic_workflow)
@@ -58,4 +62,4 @@ def build_graph():
     )
     g.add_edge("STOPPED", END)
 
-    return g.compile()
+    return g.compile(checkpointer=checkpointer)

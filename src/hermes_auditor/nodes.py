@@ -5,18 +5,28 @@
   candidate_vendor / payment_draft / plan_evidence。agent 仍是确定性 stub。
 - AUDIT 出 **risk_summary + decision**:从 PLAN 的证据组装 risk_summary,并推导
   audit_decision —— 把"风险判断"变成"控制流"。
-- HUMAN_GATE 仍 stub(不接 interrupt)。CAW_EXECUTE 接了 `HERMES_CAW=stub|real` 开关:
-  stub 出 canned tx;real subprocess 调真 caw 上 Sepolia(见 caw.py)。
+- HUMAN_GATE 接了 `HERMES_GATE=stub|real` 开关:stub 自动批准;real `interrupt` 真暂停、
+  展示 risk_summary(单闸:绑定批准在 Cobo 手机 App,见 caw.py 的 PendingApproval 等待)。
+- CAW_EXECUTE 接了 `HERMES_CAW=stub|real` 开关:stub 出 canned tx;real subprocess 调真
+  caw 上 Sepolia(见 caw.py)。
 """
 
 from __future__ import annotations
 
+import os
 from typing import Any
+
+from langgraph.types import interrupt
 
 from . import caw
 from .plan import plan_dynamic_workflow as _run_plan_pipeline
 from .plan.types import Source
 from .state import AuditDecision, HermesState
+
+# 人闸的接缝:stub(自动批准,回归免交互)| real(interrupt 真暂停,展示 Auditor 判断)。
+# 单闸设计(2026-06-10 定):绑定的资金闸是 Cobo 手机批(caw.py 的 PendingApproval 等待),
+# 这里的 interrupt 只负责「人在手机弹批之前先读到为什么」—— 展示后 resume 即续跑。
+GATE = os.getenv("HERMES_GATE", "stub")
 
 # 6.04 测试网成功路径的真实证据，用于 CAW_EXECUTE stub。
 _CAW_SUCCESS_TX = "0xf65f2d90826fe948c9fa12ec1d605f6b092a22c802795d4d5740463062ed9726"
@@ -137,20 +147,54 @@ def audit(state: HermesState) -> dict[str, Any]:
 
 
 def human_gate(state: HermesState) -> dict[str, Any]:
-    """HUMAN_GATE：在 CAW 执行前暂停等待人类批准。
+    """HUMAN_GATE：CAW 执行前的人闸。
 
-    stub：自动生成一个本地 approval object，绑定到精确的 summary_id。
-    真实实现里这里会 interrupt 等待人类输入。
+    - stub：自动生成本地 approval object,绑定精确 summary_id(回归免交互)。
+    - real：`interrupt(risk_summary 摘要)` 真暂停(需 checkpointer);run_tracer 把
+      Auditor 的判断打到终端再 resume。单闸:这里不收人决定,绑定的批/拒在 Cobo 手机
+      App(caw.py 等 PendingApproval)。防御:resume 显式传 {"approved": False} 仍可中止。
     """
     summary = state["risk_summary"]
+
+    if GATE != "stub":
+        payment = summary.get("payment") or {}
+        ack = interrupt(
+            {
+                "summary_id": summary["summary_id"],
+                "decision": summary["decision"],
+                "user_intent": summary.get("user_intent", ""),
+                "payment": {
+                    "recipient_address": payment.get("recipient_address"),
+                    "amount": payment.get("amount"),
+                    "token": payment.get("token"),
+                    "chain_id": payment.get("chain_id"),
+                },
+                "checks": summary["checks"],
+                "red_flags": summary["red_flags"],
+            }
+        )
+        if isinstance(ack, dict) and ack.get("approved") is False:
+            confirmation = {
+                "approved": False,
+                "summary_id": summary["summary_id"],
+                "approved_decision": state["audit_decision"],
+                "note": "operator aborted at interrupt (before CAW submit)",
+            }
+            out: dict[str, Any] = {"human_confirmation": confirmation}
+            out.update(_log("HUMAN_GATE", f"operator abort summary_id={summary['summary_id']}"))
+            return out
+        note = "real gate: risk_summary shown at interrupt; binding approval = Cobo App (phone)"
+    else:
+        note = "stub auto-approval (tracer bullet)"
+
     confirmation = {
         "approved": True,
         "summary_id": summary["summary_id"],
         "approved_decision": state["audit_decision"],
-        "note": "stub auto-approval (tracer bullet)",
+        "note": note,
     }
-    out: dict[str, Any] = {"human_confirmation": confirmation}
-    out.update(_log("HUMAN_GATE", f"approved summary_id={summary['summary_id']}"))
+    out = {"human_confirmation": confirmation}
+    out.update(_log("HUMAN_GATE", f"approved summary_id={summary['summary_id']} (gate={GATE})"))
     return out
 
 
