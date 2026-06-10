@@ -154,3 +154,55 @@ Agent 拿到的不是钱包私钥，也不是无限权限，而是一段被 CAW 
 1. 只把 `PLAN_DYNAMIC_WORKFLOW` 换成 Claude 调用，其他节点不动（图不关心 payment draft 是哪个模型生成的）。
 2. `HUMAN_GATE` 从 stub auto-approval 换成 LangGraph `interrupt` 真人闸门 + `checkpointer` 回放。
 3. golden set 扩到 5-6 条：正常通过 / 白名单错误 / 金额超限 / 字段偷换 / 恶意文档注入 / 余额不足。
+
+## 2026-06-09 · Day 5 — 概念纠偏 + PLAN 可逆区骨架(fan-out + adversarial)✅
+
+### 概念纠偏:Claude Dynamic Workflow 到底是什么
+
+之前一直把它当成「单 agent 自我编排的 tool-use loop」。查 Anthropic 官方 docs 后纠正:它是 **Claude Code 的正式功能**(2026-06-03 发布)——Claude 当场写一个**确定性 JS harness,编排大量独立-context 的 subagent**;「下一步做什么」是脚本决定(workflow 端),动态只在「现写脚本」这一层。
+
+**判决级约束**:dynamic workflow **不支持中途人输入**(docs:"No mid-run user input … run each stage as its own workflow")。Hermes 命根是不可逆动作前的 HUMAN_GATE,故 dynamic workflow **不能持人闸、不能当整个骨架**。
+
+**架构定向(分层,不冲突)**:
+- 外层 = LangGraph,持 HUMAN_GATE(`interrupt`)+ 回放 —— Q11 的 LangGraph 决定站得住。
+- PLAN 内层 = dynamic-workflow **模式**:可逆区扇出 subagent + adversarial verify,无中途人闸。
+- Hermes 是独立 app 调不到该 feature,PLAN 里**重实现 pattern**(Anthropic API / Agent SDK)。
+
+同步修订 `README.md` 技术栈,把 feature 与 pattern 分两层。
+
+### PLAN 骨架(`src/hermes_auditor/plan/`)
+
+| 文件 | 作用 |
+|---|---|
+| `types.py` | `Source` / `SourceFinding` / `RefuterVerdict` / `PlanResult` + `LENSES` + `QUARANTINE_TOOLS`(允许) + `EXCLUDED_TOOLS`(负空间) |
+| `agents.py` | `run_source_agent` / `run_refuter` —— 两个 agent 接缝(确定性 stub;`# TODO(real)` 处接 API,构造时 `tools=quarantine`) |
+| `pipeline.py` | `plan_dynamic_workflow`: fan-out → synthesize(代码)→ adversarial → assemble |
+| `run_plan.py` | 3 场景 demo 入口:`uv run python -m hermes_auditor.plan.run_plan` |
+
+### 三场景跑通(确定性 stub,不调模型/CAW)
+
+| 场景 | synthesize | adversarial | 结果 |
+|---|---|---|---|
+| `allow`(官方+白名单印证) | authoritative=legit | 全 pass | DRAFT ok |
+| `reject`(只有不可信注入源) | 无 authoritative | 3 镜头 REFUTED | BLOCKED → AUDIT STOP |
+| `conflict`(官方 + 注入攻击源) | authoritative=legit, suspicious=attacker | 全 pass | DRAFT ok,attacker 标记但不采用 |
+
+### 设计不变量(已落进代码)
+
+- synthesize 是**代码**,不交给某个 agent 拍板。
+- provenance **工具盖章**(`_CONFIDENCE_BY_SOURCE`),模型不能自升可信度。
+- **非对称阈值**:`authoritative is None or any(refuted)` → blocked(可逆区拒绝代价低,偏向拒)。
+- **quarantine 在代码里**:subagent 的 `tools` 只给只读组,动钱能力从未授予。
+- adversarial 验的是**将要采用**的地址 —— 连合法地址也要过对抗(纵深)。
+
+### 旁证:实跑了一个真 dynamic workflow demo
+
+用 Claude Code 的 `Workflow` 工具跑了 9 个 subagent 的 fan-out + adversarial + control(存为 `/hermes-adversarial-demo`)。实测:攻击地址 3/3 REFUTED 被拦,合法地址 control 0/3 通过(校准没误伤)。成本 ~139k token / ~2 分钟 —— 印证「这种重火力只值得用在不可逆的钱上」。
+
+### 下一步
+
+1. `agents.py` 两个 stub → 真 Anthropic API / Agent SDK 调用(独立 context + `tools=quarantine`)。
+2. fan-out / adversarial 从顺序改**并行**。
+3. `plan_dynamic_workflow` 接进 `graph.py` 的 PLAN 节点(替换现在 unpack fixture 的 stub)。
+4. `amount` 镜头接 payment 字段;`resolve_recipient_address` / `scan_for_injection` 接真实现。
+5. 真实来源的可信根:`official_docs/high` 这个章本身建立在「信这份文档」上(demo 里 agent 自己挖出的残留弱点)—— 需要第三方/链上背书。
