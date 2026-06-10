@@ -15,6 +15,19 @@
 | 状态 | `Success` · 人闸 = owner 手机批 pact |
 | 复跑 | `bash scripts/demo-transfer.sh`(owner 终端执行;agent 被 auto-mode 挡,正好演"连 Claude 都不能自动动钱")|
 
+### 整图一条龙真上链(2026-06-10 · 接通 CAW_EXECUTE)
+
+`HERMES_CAW=real uv run hermes-auditor` —— 由 PLAN→AUDIT→HUMAN_GATE→CAW_EXECUTE **全图驱动**真转账(不再是独立 caw 脚本),在同一已批准 pact `834f22c8…` 内执行。
+
+| 路 | 终态 | Tx Hash |
+|---|---|---|
+| allow | DONE · `Success/completed` | `0xede4802102be51a4ea00bdfaabd6cb48f17c8ae20b8ddaa676582413791d8b43` |
+| conflict | DONE · `Success/completed` | `0xb2a3958226595bd3db3eadb1522efdc6a73e072c4aa567904e6935a861556287` |
+| reject | STOPPED · 无 tx | PLAN blocked → AUDIT REJECT,根本不到 CAW |
+
+> **铁律实测**:同批次首轮 agent 钱包 gas 见底 → caw 终态 `Failed` → 节点如实 `FAILED→STOPPED`、**不假装成功 / 无假 tx hash**;补 gas 后才 `Success→DONE`。钱这条**没有 stub fallback**(脑可回退,钱不行)。
+> gas 补给走 caw 自带水龙头:`caw faucet deposit --address <agent钱包> --token-id SETH`(每次 0.01,日上限 0.02)。
+
 ### 历史 CAW 证据(设计血统)
 
 | 日期 | 证据 | Tx / 结果 |
