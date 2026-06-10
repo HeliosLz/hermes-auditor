@@ -37,6 +37,9 @@ def _run_one(graph, run_id: str, scenario: str) -> HermesState:
 
 
 def main() -> None:
+    from .plan import llm
+
+    print(f"brain = {llm.BRAIN}" + ("" if llm.use_model() else "  (确定性 stub,免 token)"))
     graph = build_graph()
     _run_one(graph, "run_allow_001", "allow")
     _run_one(graph, "run_reject_001", "reject")
