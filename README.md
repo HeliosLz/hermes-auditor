@@ -25,6 +25,7 @@ AI × Web3 Agentic Builders Hackathon 参赛项目（主攻 Cobo 赛道）。
 - ✅ Day 2（2026-06-06）— CAW policy 拦截跑通：错误收款地址被 `ADDRESS_NOT_WHITELISTED` 拒绝，未广播链上交易。
 - ✅ Day 3（2026-06-07）— `risk_summary` schema + fixtures 入项目。
 - ✅ Day 4（2026-06-08）— LangGraph tracer bullet 跑通：5 stub 节点 + 两条 fixture run 分别到 `DONE` / `STOPPED`，不接模型/CAW。
+- ✅ Day 5（2026-06-09）— 概念纠偏（dynamic workflow 分层）+ PLAN 可逆区骨架（`plan/`：fan-out + adversarial，allow/reject/conflict 三场景跑通，stub）。
 
 ## 运行
 
