@@ -5,13 +5,15 @@
   candidate_vendor / payment_draft / plan_evidence。agent 仍是确定性 stub。
 - AUDIT 出 **risk_summary + decision**:从 PLAN 的证据组装 risk_summary,并推导
   audit_decision —— 把"风险判断"变成"控制流"。
-- HUMAN_GATE / CAW_EXECUTE 仍 stub(不接 interrupt、不接真 CAW)。
+- HUMAN_GATE 仍 stub(不接 interrupt)。CAW_EXECUTE 接了 `HERMES_CAW=stub|real` 开关:
+  stub 出 canned tx;real subprocess 调真 caw 上 Sepolia(见 caw.py)。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from . import caw
 from .plan import plan_dynamic_workflow as _run_plan_pipeline
 from .plan.types import Source
 from .state import AuditDecision, HermesState
@@ -155,14 +157,32 @@ def human_gate(state: HermesState) -> dict[str, Any]:
 def caw_execute(state: HermesState) -> dict[str, Any]:
     """CAW_EXECUTE：只在 human confirmation 之后执行。
 
-    stub：返回 6.04 那笔测试网成功转账的记录。真实实现里这里 call CAW，
-    必须区分成功 tx hash 和 CAW enforced STOP。
+    按 `HERMES_CAW` 分派(见 caw.py):
+    - stub：返回 6.04 那笔测试网成功转账的 canned 记录(免动钱)。
+    - real：subprocess 调真 caw 上 Sepolia,拿真 tx_hash。
+
+    铁律:real 任何失败 → status 非 SUCCESS、**绝不假 tx_hash** → 路由进 STOPPED。
+    成功 tx hash 与 CAW enforced STOP 在这里被严格区分。
     """
     confirmation = state.get("human_confirmation", {})
     if not confirmation.get("approved"):
         result = {"status": "BLOCKED", "reason": "no human confirmation"}
         out: dict[str, Any] = {"caw_result": result}
         out.update(_log("CAW_EXECUTE", "blocked: missing confirmation"))
+        return out
+
+    if caw.use_real():
+        payment = state.get("payment_draft") or {}
+        try:
+            result = caw.execute_transfer(payment, state.get("run_id", "run"))
+        except Exception as e:  # 真转账:任何异常都不假装成功
+            result = {"status": "BLOCKED", "reason": f"CAW real 异常: {type(e).__name__}: {e}"}
+        if result.get("status") == "SUCCESS":
+            detail = f"real success tx={str(result.get('tx_hash', ''))[:14]}..."
+        else:
+            detail = f"real {result.get('status')}: {result.get('reason', '')}"
+        out: dict[str, Any] = {"caw_result": result}
+        out.update(_log("CAW_EXECUTE", detail))
         return out
 
     result = {
