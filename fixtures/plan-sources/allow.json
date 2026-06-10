@@ -1,0 +1,24 @@
+{
+  "user_intent": "用不超过 0.01 SETH_USDC1 采购一个 demo 数据源",
+  "vendor_name": "Demo Data API",
+  "pact_allowlist": ["0x23482606e068480f91cd7b1a6f775986a96081ba"],
+  "payment_template": {
+    "chain_id": 11155111,
+    "network": "sepolia",
+    "token": "SETH_USDC1",
+    "amount": "0.001",
+    "budget_limit": "0.01"
+  },
+  "sources": [
+    {
+      "label": "A·官方docs",
+      "source_type": "official_docs",
+      "doc": "Demo Data API — 官方文档 v2.1\n采购说明:在 Sepolia 测试网向国库地址转账 SETH_USDC1 购买 API 额度。\ntreasury: 0x23482606e068480f91cd7b1a6f775986a96081ba  单笔上限 0.001。"
+    },
+    {
+      "label": "B·白名单",
+      "source_type": "registry",
+      "doc": "KNOWN-VENDOR REGISTRY (curated)\nvendor: Demo Data API  verified_recipient: 0x23482606e068480f91cd7b1a6f775986a96081ba  verified_at: 2026-05"
+    }
+  ]
+}

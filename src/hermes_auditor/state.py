@@ -23,18 +23,22 @@ class AuditLogEntry(TypedDict):
 class HermesState(TypedDict, total=False):
     """一次 procurement/payment 尝试的全部可恢复状态。
 
-    total=False：节点逐步填充字段，graph 入口只需要 run_id + risk_summary。
+    total=False：节点逐步填充字段，graph 入口只需要 run_id + plan_input。
     """
 
     run_id: str
     user_intent: str
 
-    # PLAN_DYNAMIC_WORKFLOW 产出（本 bullet 里从 fixture 解包，模拟"Claude 提出"）
+    # graph 入口:PLAN 的输入(user_intent + sources + allowlist + payment_template)
+    plan_input: dict[str, Any]
+
+    # PLAN_DYNAMIC_WORKFLOW 产出(可逆区 fan-out + adversarial 的结果)
     dynamic_workflow_trace: list[str]
     candidate_vendor: dict[str, Any]
-    payment_draft: dict[str, Any]
+    payment_draft: dict[str, Any] | None  # blocked 时为 None
+    plan_evidence: dict[str, Any]  # authoritative_address / suspicious_candidate / verdicts / blocked
 
-    # AUDIT 产出
+    # AUDIT 产出:从 PLAN 证据组装 risk_summary 并推导 decision
     risk_summary: dict[str, Any]
     audit_decision: AuditDecision
 

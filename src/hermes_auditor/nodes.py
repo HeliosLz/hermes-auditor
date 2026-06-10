@@ -1,18 +1,19 @@
-"""五个 stub 节点。
+"""五个图节点。
 
-第一条 tracer bullet 只证明控制流，不证明智能：
-- 不调用 Claude（PLAN 从 fixture 解包，模拟"Claude 已提出"）。
-- 不调用 CAW（CAW_EXECUTE 返回 6.04 那笔成功 tx 的记录）。
-
-唯一有真实逻辑的是 AUDIT：它从 risk_summary 的 checks / red_flags **推导**
-audit_decision，而不是直接读 fixture 自带的 decision 标签。这一步把"风险判断"
-变成"控制流"，是 Auditor 存在的理由。
+职责边界(今天接通的接缝):
+- PLAN 出**事实 + 证据**:跑可逆区 fan-out + adversarial(plan/ 子包),产出
+  candidate_vendor / payment_draft / plan_evidence。agent 仍是确定性 stub。
+- AUDIT 出 **risk_summary + decision**:从 PLAN 的证据组装 risk_summary,并推导
+  audit_decision —— 把"风险判断"变成"控制流"。
+- HUMAN_GATE / CAW_EXECUTE 仍 stub(不接 interrupt、不接真 CAW)。
 """
 
 from __future__ import annotations
 
 from typing import Any
 
+from .plan import plan_dynamic_workflow as _run_plan_pipeline
+from .plan.types import Source
 from .state import AuditDecision, HermesState
 
 # 6.04 测试网成功路径的真实证据，用于 CAW_EXECUTE stub。
@@ -26,24 +27,37 @@ def _log(node: str, detail: str) -> dict[str, Any]:
 
 
 def plan_dynamic_workflow(state: HermesState) -> dict[str, Any]:
-    """PLAN_DYNAMIC_WORKFLOW：可逆准备。
+    """PLAN_DYNAMIC_WORKFLOW：可逆区 fan-out + adversarial。
 
-    本 bullet 里 fixture 已是 post-plan 的 risk_summary，所以这里只解包 vendor 和
-    payment，模拟"Claude Dynamic Workflow 已经提出候选 vendor 和 payment draft"。
-    规则：不调用 CAW，不把 payment 标记为已批准。
+    调 plan/ 子包:多源查地址 → synthesize(代码)→ adversarial 反驳 → assemble。
+    产出 candidate_vendor / payment_draft / plan_evidence,交给 AUDIT。
+    规则:全程 quarantine(subagent 无动钱工具),不调用 CAW,不标记已批准。
     """
-    summary = state["risk_summary"]
+    pin = state["plan_input"]
+    sources = [Source(s["label"], s["source_type"], s["doc"]) for s in pin["sources"]]
+    result = _run_plan_pipeline(
+        user_intent=pin["user_intent"],
+        sources=sources,
+        pact_allowlist=tuple(pin["pact_allowlist"]),
+        payment_template=pin["payment_template"],
+        vendor_name=pin.get("vendor_name", "Demo Data API"),
+    )
+
+    recipient = result.payment_draft["recipient_address"] if result.payment_draft else "none"
     out: dict[str, Any] = {
-        "user_intent": summary["user_intent"],
-        "dynamic_workflow_trace": [
-            f"propose vendor: {summary['vendor']['name']}",
-            f"draft payment: {summary['payment']['amount']} {summary['payment']['token']}",
-        ],
-        "candidate_vendor": summary["vendor"],
-        "payment_draft": summary["payment"],
+        "user_intent": result.user_intent,
+        "dynamic_workflow_trace": result.trace,
+        "candidate_vendor": result.candidate_vendor,
+        "payment_draft": result.payment_draft,
+        "plan_evidence": {
+            "authoritative_address": result.authoritative_address,
+            "suspicious_candidate": result.suspicious_candidate,
+            "verdicts": [{"lens": v.lens, "refuted": v.refuted, "reason": v.reason} for v in result.verdicts],
+            "blocked": result.blocked,
+        },
         "error": None,
     }
-    out.update(_log("PLAN_DYNAMIC_WORKFLOW", f"proposed vendor={summary['vendor']['name']}"))
+    out.update(_log("PLAN_DYNAMIC_WORKFLOW", f"blocked={result.blocked} recipient={recipient}"))
     return out
 
 
@@ -65,20 +79,58 @@ def _derive_decision(summary: dict[str, Any]) -> tuple[AuditDecision, str]:
     return "ALLOW", "all binding checks passed"
 
 
-def audit(state: HermesState) -> dict[str, Any]:
-    """AUDIT：检查 + 生成 audit_decision。
+def _checks_from_verdicts(verdicts: dict[str, dict[str, Any]]) -> dict[str, bool]:
+    """把 PLAN 的 refuter verdicts 映射成 risk_summary 的 checks。
 
-    decision 由 checks 推导。fixture 自带的 decision 字段只当 oracle，用来验证
-    推导逻辑是否和设计意图一致（记进 audit_log，不参与控制流）。
+    PLAN 的信号是 advisory;AUDIT 在这里组装成自己的 checks(真模型接通后,这一步
+    会改成 AUDIT 独立重核,而非直接采信 PLAN)。
     """
-    summary = state["risk_summary"]
-    decision, reason = _derive_decision(summary)
 
-    oracle = summary.get("decision")
-    consistent = "ok" if oracle == decision else f"MISMATCH oracle={oracle}"
+    def refuted(lens: str) -> bool:
+        return verdicts.get(lens, {}).get("refuted", False)
 
-    out: dict[str, Any] = {"audit_decision": decision}
-    out.update(_log("AUDIT", f"decision={decision} ({reason}); fixture-oracle={consistent}"))
+    return {
+        "address_matches_source": not refuted("provenance"),
+        "amount_within_budget": not refuted("amount"),
+        "recipient_first_seen": True,  # stub: CAW 链上状态未接
+        "policy_matches_summary": not refuted("policy"),
+        "prompt_injection_detected": refuted("injection"),
+    }
+
+
+def audit(state: HermesState) -> dict[str, Any]:
+    """AUDIT：从 PLAN 证据组装 risk_summary，并推导 audit_decision。
+
+    PLAN 出事实+证据,AUDIT 出 checks+决策。blocked(无权威来源/证据不足)是硬 REJECT。
+    """
+    evidence = state["plan_evidence"]
+    verdicts = {v["lens"]: v for v in evidence["verdicts"]}
+    checks = _checks_from_verdicts(verdicts)
+    red_flags = [
+        {"severity": "high", "message": v["reason"]}
+        for v in evidence["verdicts"]
+        if v["refuted"]
+    ]
+
+    if evidence["blocked"]:
+        decision: AuditDecision = "REJECT"
+        reason = "PLAN blocked: 无权威来源 / 证据不足"
+    else:
+        decision, reason = _derive_decision({"checks": checks, "red_flags": red_flags})
+
+    risk_summary = {
+        "summary_id": f"rs_{state.get('run_id', 'run')}",
+        "user_intent": state.get("user_intent", ""),
+        "vendor": state.get("candidate_vendor", {}),
+        "payment": state.get("payment_draft") or {},
+        "checks": checks,
+        "red_flags": red_flags or [{"severity": "none", "message": "no material red flags"}],
+        "decision": decision,
+        "plan_evidence": evidence,
+    }
+
+    out: dict[str, Any] = {"risk_summary": risk_summary, "audit_decision": decision}
+    out.update(_log("AUDIT", f"decision={decision} ({reason})"))
     return out
 
 

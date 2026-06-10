@@ -1,26 +1,28 @@
-"""第一条 tracer bullet 的入口。
+"""整图入口:PLAN(可逆区 fan-out + adversarial)→ AUDIT → HUMAN_GATE → CAW_EXECUTE。
 
-跑两条 fixture 驱动的 run，打印每一条的 audit_log 和终态：
-- allow-normal-payment   -> AUDIT -> HUMAN_GATE -> CAW_EXECUTE -> DONE
-- reject-wrong-recipient -> AUDIT -> STOPPED
+    uv run hermes-auditor
 
-只证明控制流，不调用模型，不调用 CAW。
+三条 PLAN-source 驱动的 run:
+- allow    -> ALLOW  -> HUMAN_GATE -> CAW_EXECUTE -> DONE
+- reject   -> REJECT -> STOPPED
+- conflict -> ALLOW(挑出 legit、标记 attacker) -> ... -> DONE
+
+PLAN 的 agent 仍是确定性 stub;不调真模型,不调真 CAW。
 """
 
 from __future__ import annotations
 
-from .fixtures_io import load_risk_summary
+from .fixtures_io import load_plan_input
 from .graph import build_graph
 from .state import HermesState
 
 
-def _run_one(graph, run_id: str, fixture_name: str) -> HermesState:
-    summary = load_risk_summary(fixture_name)
-    initial: HermesState = {"run_id": run_id, "risk_summary": summary, "audit_log": []}
+def _run_one(graph, run_id: str, scenario: str) -> HermesState:
+    plan_input = load_plan_input(scenario)
+    initial: HermesState = {"run_id": run_id, "plan_input": plan_input, "audit_log": []}
     final: HermesState = graph.invoke(initial)
 
-    print(f"\n=== RUN {run_id}  ({fixture_name}) ===")
-    print(f"summary_id : {summary['summary_id']}")
+    print(f"\n=== RUN {run_id}  (plan-sources/{scenario}) ===")
     for i, entry in enumerate(final["audit_log"], 1):
         print(f"  {i}. [{entry['node']}] {entry['detail']}")
 
@@ -36,8 +38,9 @@ def _run_one(graph, run_id: str, fixture_name: str) -> HermesState:
 
 def main() -> None:
     graph = build_graph()
-    _run_one(graph, "run_allow_001", "allow-normal-payment")
-    _run_one(graph, "run_reject_001", "reject-wrong-recipient")
+    _run_one(graph, "run_allow_001", "allow")
+    _run_one(graph, "run_reject_001", "reject")
+    _run_one(graph, "run_conflict_001", "conflict")
 
 
 if __name__ == "__main__":

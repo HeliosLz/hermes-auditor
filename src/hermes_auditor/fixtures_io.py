@@ -16,6 +16,10 @@ from jsonschema import Draft202012Validator
 _ROOT = Path(__file__).resolve().parents[2]
 _SCHEMA_PATH = _ROOT / "schemas" / "risk-summary.schema.json"
 _FIXTURE_DIR = _ROOT / "fixtures" / "risk-summary"
+_PLAN_SOURCE_DIR = _ROOT / "fixtures" / "plan-sources"
+
+_PLAN_INPUT_REQUIRED = ("user_intent", "pact_allowlist", "payment_template", "sources")
+_SOURCE_REQUIRED = ("label", "source_type", "doc")
 
 
 def _load_schema() -> dict[str, Any]:
@@ -38,3 +42,23 @@ def load_risk_summary(name: str) -> dict[str, Any]:
         raise ValueError(f"fixture {filename} 不符合 risk-summary schema -> {msgs}")
 
     return summary
+
+
+def load_plan_input(name: str) -> dict[str, Any]:
+    """读取一个 PLAN-输入 fixture(sources bundle)并做最小结构校验。
+
+    name 是 fixtures/plan-sources/ 下的文件名(带或不带 .json 均可)。
+    PLAN 输入 ≠ risk_summary:它是 PLAN 之前的「各路材料」,不走 risk-summary schema。
+    """
+    filename = name if name.endswith(".json") else f"{name}.json"
+    data = json.loads((_PLAN_SOURCE_DIR / filename).read_text(encoding="utf-8"))
+
+    missing = [k for k in _PLAN_INPUT_REQUIRED if k not in data]
+    if missing:
+        raise ValueError(f"plan-source {filename} 缺字段: {missing}")
+    for i, src in enumerate(data["sources"]):
+        bad = [k for k in _SOURCE_REQUIRED if k not in src]
+        if bad:
+            raise ValueError(f"plan-source {filename} sources[{i}] 缺字段: {bad}")
+
+    return data
