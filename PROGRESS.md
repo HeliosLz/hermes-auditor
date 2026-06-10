@@ -206,3 +206,43 @@ Agent 拿到的不是钱包私钥，也不是无限权限，而是一段被 CAW 
 3. `plan_dynamic_workflow` 接进 `graph.py` 的 PLAN 节点(替换现在 unpack fixture 的 stub)。
 4. `amount` 镜头接 payment 字段;`resolve_recipient_address` / `scan_for_injection` 接真实现。
 5. 真实来源的可信根:`official_docs/high` 这个章本身建立在「信这份文档」上(demo 里 agent 自己挖出的残留弱点)—— 需要第三方/链上背书。
+
+## 2026-06-10 · Day 6 — 接通 PLAN→AUDIT 接缝 + 接 gpt-5.5 真脑 ✅
+
+### 接通 PLAN→AUDIT(职责边界落进代码)
+
+把昨天孤立的 `plan/` 骨架接进 LangGraph 整图,接缝倒过来理顺:
+
+```text
+旧(脱节):  risk_summary fixture → PLAN 解包 → AUDIT 读同一个 fixture
+新(接通):  plan-sources fixture → PLAN 出 payment_draft+证据 → AUDIT 出 risk_summary+决策
+```
+
+- 新增 `fixtures/plan-sources/{allow,reject,conflict}.json`(PLAN 输入 = 各路材料,区别于 risk-summary)。
+- `nodes.plan_dynamic_workflow` 调 `plan/` 骨架产出 draft+`plan_evidence`;`nodes.audit` 从证据组装 risk_summary、推导 decision(`blocked` = 硬 REJECT)。
+- 关键认知:**`risk_summary` 不是输入,是 PLAN 的产出 / AUDIT 的输出。**
+
+### 接 gpt-5.5 真脑(脑选型 + 开关)
+
+- 脑选型:**gpt-5.5(经 `ai.input.im` 网关,OpenAI 兼容)**。GLM 非硬性要求(user 2026-06-10),gpt-5.5 已 eval 验过、零设置。直连 api.openai.com 被区域封锁(403),走网关用 `OPENAI_API_KEY`。
+- `plan/llm.py`:脑接缝。`HERMES_BRAIN=stub`(默认,免 token)| `gpt-5.5`(responses API)。
+- `plan/agents.py`:`run_source_agent` / `run_refuter` 按开关分派,**失败自动回退 stub**(live demo 网关抽风兜底)。confidence 仍工具盖章,模型只判抽址/注入/对抗。
+
+### 跑通证据
+
+| 脑 | allow | reject | conflict |
+|---|---|---|---|
+| stub | DONE | STOPPED | DONE |
+| **gpt-5.5** | **DONE** | **STOPPED** | **DONE** |
+
+两种脑三场景终态一致;gpt-5.5 模式是真模型推理在跑 fan-out + adversarial。eval(`eval_brain.py`):攻击 3/3 拦、control 0/3 误伤,与 06-09 Claude demo 持平。
+
+### 对 demo 的意义
+
+"真脑 + 真控制流" 跑通 → demo 作战图里**原 Day 12 的"接真脑"腿提前完成**,补回 Day 13 损失的 buffer。剩:真 CAW(Day 11 money shot)+ 真人闸 + demo 脚本 + 录制。`stub|gpt-5.5` 开关 + 回退 = live demo 兜底。
+
+### 下一步
+
+1. `CAW_EXECUTE` 接真 `caw`(money shot);`HUMAN_GATE` 接 Cobo 手机批 Pact。
+2. fan-out / adversarial 从顺序改并行(现在真脑顺序跑稍慢)。
+3. `amount` 镜头接 payment 字段。
