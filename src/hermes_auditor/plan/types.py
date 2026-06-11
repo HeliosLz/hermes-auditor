@@ -19,6 +19,15 @@ class Source:
 
 
 @dataclass
+class Vendor:
+    """采购比价里的一个候选供应商:自报价格 + 各路材料(收款地址藏在材料里,待查证)。"""
+
+    name: str
+    price: str  # 字符串保精度(与 payment amount 同款)
+    sources: list[Source]
+
+
+@dataclass
 class SourceFinding:
     """一个 fan-out subagent 的产出。provenance 由工具盖章,不由模型自称。"""
 
@@ -57,6 +66,9 @@ class PlanResult:
     # 决策者审计:真脑模式下共发起几次 agent 调用、其中几次回退了 stub(0=全真脑)。
     brain_calls: int = 0
     brain_fallbacks: int = 0
+    # 采购比价:逐 vendor 的 {name, price, address, trusted, within_budget, reason};单 vendor 路为空。
+    comparison: list[dict] = field(default_factory=list)
+    selected_vendor: str | None = None
 
 
 # 对抗验证的镜头:perspective-diverse,各抓一类失败模式。

@@ -9,6 +9,6 @@ subagent 只读、不含动钱工具。
 agents.py 的 TODO。
 """
 
-from .pipeline import plan_dynamic_workflow
+from .pipeline import plan_dynamic_workflow, procure_dynamic_workflow
 
-__all__ = ["plan_dynamic_workflow"]
+__all__ = ["plan_dynamic_workflow", "procure_dynamic_workflow"]

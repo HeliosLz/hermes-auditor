@@ -20,6 +20,8 @@ _PLAN_SOURCE_DIR = _ROOT / "fixtures" / "plan-sources"
 
 _PLAN_INPUT_REQUIRED = ("user_intent", "pact_allowlist", "payment_template", "sources")
 _SOURCE_REQUIRED = ("label", "source_type", "doc")
+_PROCUREMENT_REQUIRED = ("user_intent", "pact_allowlist", "payment_template", "vendors")
+_VENDOR_REQUIRED = ("name", "price", "sources")
 
 
 def _load_schema() -> dict[str, Any]:
@@ -60,5 +62,28 @@ def load_plan_input(name: str) -> dict[str, Any]:
         bad = [k for k in _SOURCE_REQUIRED if k not in src]
         if bad:
             raise ValueError(f"plan-source {filename} sources[{i}] 缺字段: {bad}")
+
+    return data
+
+
+def load_procurement_input(name: str) -> dict[str, Any]:
+    """读取一个采购-输入 fixture(vendor 目录)并做最小结构校验。
+
+    采购输入 = 多个候选 vendor,每个自报价格 + 各路材料;区别于单 vendor 的 sources bundle。
+    """
+    filename = name if name.endswith(".json") else f"{name}.json"
+    data = json.loads((_PLAN_SOURCE_DIR / filename).read_text(encoding="utf-8"))
+
+    missing = [k for k in _PROCUREMENT_REQUIRED if k not in data]
+    if missing:
+        raise ValueError(f"procurement {filename} 缺字段: {missing}")
+    for i, v in enumerate(data["vendors"]):
+        bad = [k for k in _VENDOR_REQUIRED if k not in v]
+        if bad:
+            raise ValueError(f"procurement {filename} vendors[{i}] 缺字段: {bad}")
+        for j, src in enumerate(v["sources"]):
+            sbad = [k for k in _SOURCE_REQUIRED if k not in src]
+            if sbad:
+                raise ValueError(f"procurement {filename} vendors[{i}].sources[{j}] 缺字段: {sbad}")
 
     return data

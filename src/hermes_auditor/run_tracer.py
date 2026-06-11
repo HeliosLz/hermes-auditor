@@ -24,7 +24,7 @@ from typing import Any
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
-from .fixtures_io import load_plan_input
+from .fixtures_io import load_plan_input, load_procurement_input
 from .graph import build_graph
 from .state import HermesState
 
@@ -56,6 +56,19 @@ def _print_plan_panel(final: HermesState) -> None:
     """
     trace = final.get("dynamic_workflow_trace") or []
     ev = final.get("plan_evidence") or {}
+
+    # 采购比价表(仅 vendors 路有);让评委看到「发现候选 → 比价 → 审计当闸」。
+    comparison = ev.get("comparison") or []
+    if comparison:
+        sel = ev.get("selected_vendor")
+        print("\n  ┌─ 采购比价(发现候选 → 比价 → 审计当闸)" + "─" * 18)
+        for c in comparison:
+            win = " ★WINNER" if c.get("name") == sel else ""
+            mark = "✓" if c.get("trusted") and c.get("within_budget") else "✗"
+            print(f"  │ {mark} {c.get('name'):22} 价 {c.get('price'):8} {c.get('address')}")
+            print(f"  │     └ {c.get('reason')}{win}")
+        print("  └" + "─" * 50)
+
     print("\n  ┌─ PLAN · 可逆区调查(fan-out + 对抗验证)" + "─" * 22)
     for line in trace:
         # trace 行形如 [fan-out] / [synthesize] / [adversarial:lens] / [assemble] / [brain]
@@ -85,8 +98,8 @@ def _print_audit_panel(final: HermesState) -> None:
     print("  └" + "─" * 50)
 
 
-def _run_one(graph, run_id: str, scenario: str) -> HermesState:
-    plan_input = load_plan_input(scenario)
+def _run_one(graph, run_id: str, scenario: str, loader=load_plan_input) -> HermesState:
+    plan_input = loader(scenario)
     initial: HermesState = {"run_id": run_id, "plan_input": plan_input, "audit_log": []}
     config = {"configurable": {"thread_id": run_id}}
 
@@ -123,17 +136,39 @@ def _run_one(graph, run_id: str, scenario: str) -> HermesState:
     return final
 
 
+# 场景登记表:name -> (run_id, loader)。procurement 走 vendor 目录 loader,其余走单 vendor。
+_SCENARIOS: dict[str, tuple[str, Any]] = {
+    "procurement": ("run_procurement_001", load_procurement_input),
+    "allow": ("run_allow_001", load_plan_input),
+    "reject": ("run_reject_001", load_plan_input),
+    "conflict": ("run_conflict_001", load_plan_input),
+}
+# 默认全跑(回归);命令行可挑场景做 demo 录制:
+#   uv run hermes-auditor procurement        # hero(1 笔,1 次手机批)
+#   uv run hermes-auditor reject conflict     # 攻击路(不动钱)
+_DEFAULT_ORDER = ["procurement", "allow", "reject", "conflict"]
+
+
 def main() -> None:
+    import sys
+
     from . import caw, nodes
     from .plan import llm
+
+    picked = [a for a in sys.argv[1:] if a in _SCENARIOS]
+    scenarios = picked or _DEFAULT_ORDER
+    if [a for a in sys.argv[1:] if a not in _SCENARIOS]:
+        bad = [a for a in sys.argv[1:] if a not in _SCENARIOS]
+        print(f"(忽略未知场景 {bad};可选: {list(_SCENARIOS)})")
 
     print(f"brain = {llm.BRAIN}" + ("" if llm.use_model() else "  (确定性 stub,免 token)"))
     print(f"caw   = {caw.CAW}" + ("  (真上链+手机批 · owner 终端跑)" if caw.use_real() else "  (canned tx,免动钱)"))
     print(f"gate  = {nodes.GATE}" + ("  (interrupt 暂停,展示 Auditor 判断)" if nodes.GATE != "stub" else "  (自动批准,免交互)"))
+    print(f"跑 {len(scenarios)} 场景: {scenarios}")
     graph = build_graph(checkpointer=MemorySaver())
-    _run_one(graph, "run_allow_001", "allow")
-    _run_one(graph, "run_reject_001", "reject")
-    _run_one(graph, "run_conflict_001", "conflict")
+    for name in scenarios:
+        run_id, loader = _SCENARIOS[name]
+        _run_one(graph, run_id, name, loader)
 
 
 if __name__ == "__main__":

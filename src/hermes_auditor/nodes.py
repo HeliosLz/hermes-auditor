@@ -21,7 +21,8 @@ from langgraph.types import interrupt
 from . import caw
 from .plan import llm as plan_llm
 from .plan import plan_dynamic_workflow as _run_plan_pipeline
-from .plan.types import Source
+from .plan import procure_dynamic_workflow as _run_procure_pipeline
+from .plan.types import Source, Vendor
 from .state import AuditDecision, HermesState
 
 # 人闸的接缝:stub(自动批准,回归免交互)| real(interrupt 真暂停,展示 Auditor 判断)。
@@ -42,19 +43,33 @@ def _log(node: str, detail: str) -> dict[str, Any]:
 def plan_dynamic_workflow(state: HermesState) -> dict[str, Any]:
     """PLAN_DYNAMIC_WORKFLOW：可逆区 fan-out + adversarial。
 
-    调 plan/ 子包:多源查地址 → synthesize(代码)→ adversarial 反驳 → assemble。
-    产出 candidate_vendor / payment_draft / plan_evidence,交给 AUDIT。
+    两种输入,自动分流(都产出同款 PlanResult,交给 AUDIT):
+    - `vendors`(采购目录)→ 比价×审计:发现候选 → 比价(便宜优先,审计当闸)→ 赢家完整对抗。
+    - `sources`(单 vendor 材料)→ 原单 vendor 路:多源查地址 → synthesize → adversarial。
     规则:全程 quarantine(subagent 无动钱工具),不调用 CAW,不标记已批准。
     """
     pin = state["plan_input"]
-    sources = [Source(s["label"], s["source_type"], s["doc"]) for s in pin["sources"]]
-    result = _run_plan_pipeline(
-        user_intent=pin["user_intent"],
-        sources=sources,
-        pact_allowlist=tuple(pin["pact_allowlist"]),
-        payment_template=pin["payment_template"],
-        vendor_name=pin.get("vendor_name", "Demo Data API"),
-    )
+    if "vendors" in pin:
+        vendors = [
+            Vendor(v["name"], v["price"], [Source(s["label"], s["source_type"], s["doc"]) for s in v["sources"]])
+            for v in pin["vendors"]
+        ]
+        result = _run_procure_pipeline(
+            user_intent=pin["user_intent"],
+            vendors=vendors,
+            pact_allowlist=tuple(pin["pact_allowlist"]),
+            payment_template=pin["payment_template"],
+            budget_limit=pin["payment_template"].get("budget_limit", "0"),
+        )
+    else:
+        sources = [Source(s["label"], s["source_type"], s["doc"]) for s in pin["sources"]]
+        result = _run_plan_pipeline(
+            user_intent=pin["user_intent"],
+            sources=sources,
+            pact_allowlist=tuple(pin["pact_allowlist"]),
+            payment_template=pin["payment_template"],
+            vendor_name=pin.get("vendor_name", "Demo Data API"),
+        )
 
     recipient = result.payment_draft["recipient_address"] if result.payment_draft else "none"
     out: dict[str, Any] = {
@@ -71,10 +86,15 @@ def plan_dynamic_workflow(state: HermesState) -> dict[str, Any]:
             "brain": plan_llm.BRAIN,
             "brain_calls": result.brain_calls,
             "brain_fallbacks": result.brain_fallbacks,
+            # 采购比价:逐 vendor 价格×审计 + 选中谁(单 vendor 路为空)。
+            "comparison": result.comparison,
+            "selected_vendor": result.selected_vendor,
         },
         "error": None,
     }
     detail = f"blocked={result.blocked} recipient={recipient}"
+    if result.selected_vendor:
+        detail = f"selected={result.selected_vendor} " + detail
     if plan_llm.use_model():
         if result.brain_fallbacks:
             detail += f" brain={plan_llm.BRAIN} ⚠{result.brain_fallbacks}/{result.brain_calls} 回退 stub"
