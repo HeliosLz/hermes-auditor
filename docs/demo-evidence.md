@@ -2,22 +2,40 @@
 
 > 服务 2026-06-14 现场 live demo。live demo 铁律:**手里永远有一条录好的真东西**。
 > 这里汇总所有可放的真实证据 + 待录清单。
+> 链上确认:下列 tx 均经 Sepolia RPC `eth_getTransactionByHash` 核过,真实存活(2026-06-11 复核)。
 
-## ✅ 真 CAW 上链(money shot · 正常路)
+## ✅ 头条:真人闸 · **每笔手机批**(单闸 money shot · 2026-06-10 晚)
+
+这是最强的一条:owner 不是批一次授权后任其自动跑,而是**亲手批准「这一笔」付款**——pact 带 `always_review`,每笔 transfer 都进 owner 手机审批,批了才上链。
 
 | 项 | 值 |
 |---|---|
-| 日期 | 2026-06-10 |
-| Pact ID | `834f22c8-9f82-4811-9f7b-090c8ede0b0b`(锁死收款地址 + 0.001/笔 + 6 天)|
+| 日期 | 2026-06-10 晚 |
+| Pact ID | `91860633-bc88-4b6c-8380-26844cb63c0b`(`always_review` · 锁死收款地址 + 0.001/笔)|
+| 流程 | 整图 PLAN→AUDIT→HUMAN_GATE(interrupt 展示判断)→ CAW 提交 → **`PendingApproval` → owner 手机批这一笔** → 上链 |
+| 路 | conflict(官方源+注入源同在 → Auditor 挑出合法地址 → ALLOW)|
+| Tx Hash | `0x4832568957d87c7c9c7abd616aef2e1693dbc052809c589f66b5306fa0e83141` |
+| Etherscan | https://sepolia.etherscan.io/tx/0x4832568957d87c7c9c7abd616aef2e1693dbc052809c589f66b5306fa0e83141 |
+| 状态 | `Success` · **人闸 = owner 手机批「这一笔」**(非 pact 级一次性授权)|
+| 时间线 | 提交 12:54:34 → 手机弹批 → owner 12:54:58 批准 → 上链 `Success` |
+| 复跑 | `HERMES_CAW=real HERMES_GATE=real uv run hermes-auditor`(owner 终端;allow+conflict 各弹一次手机批)|
+
+> **叙事要点**:pact 级手机批(下方旧 pact)= 批一次授权、范围内自动执行;**单闸每笔手机批 = 每一笔不可逆付款都过 owner 的手**。后者才是 demo 该讲的故事——评委更买"每笔过人手"。
+
+## ✅ 授权级手机批 + 整图一条龙(2026-06-10 · 旧自动 pact)
+
+旧 pact `834f22c8…`:owner 手机批准 **pact 本身**(锁死收款地址 + 0.001/笔 + 6 天),之后范围内 transfer **自动执行**。仍是有效证据(演"最小授权"),但人闸在授权级、非每笔。
+
+| 项 | 值 |
+|---|---|
+| Pact ID | `834f22c8-9f82-4811-9f7b-090c8ede0b0b` |
 | 动作 | transfer 0.001 `SETH_USDC1` → `0x23482606e068480f91cd7b1a6f775986a96081ba`(Sepolia)|
-| Tx Hash | `0xa5e38782885bd6680fedd33312ddaf5f1c8be03c41e739bd877f2e2dee241f24` |
-| Etherscan | https://sepolia.etherscan.io/tx/0xa5e38782885bd6680fedd33312ddaf5f1c8be03c41e739bd877f2e2dee241f24 |
-| 状态 | `Success` · 人闸 = owner 手机批 pact |
-| 复跑 | `bash scripts/demo-transfer.sh`(owner 终端执行;agent 被 auto-mode 挡,正好演"连 Claude 都不能自动动钱")|
+| 首跑 Tx | `0xa5e38782885bd6680fedd33312ddaf5f1c8be03c41e739bd877f2e2dee241f24`(`Success`)|
+| 复跑 | `bash scripts/demo-transfer.sh`(owner 终端;agent 被 auto-mode 挡,正好演"连 Claude 都不能自动动钱")|
 
-### 整图一条龙真上链(2026-06-10 · 接通 CAW_EXECUTE)
+### 整图一条龙真上链(全图驱动,同 `834f22c8` 内)
 
-`HERMES_CAW=real uv run hermes-auditor` —— 由 PLAN→AUDIT→HUMAN_GATE→CAW_EXECUTE **全图驱动**真转账(不再是独立 caw 脚本),在同一已批准 pact `834f22c8…` 内执行。
+`HERMES_CAW=real uv run hermes-auditor` —— 由 PLAN→AUDIT→HUMAN_GATE→CAW_EXECUTE **全图驱动**真转账(不再是独立 caw 脚本)。
 
 | 路 | 终态 | Tx Hash |
 |---|---|---|
@@ -48,12 +66,26 @@
 
 ## ⬜ 待录 backup(增量,别押 Day 13)
 
-- [ ] **正常路片段**:跑 allow 流程 → 手机批 → 真转账 → 打开 etherscan。屏录。
-- [ ] **攻击路片段**:跑 reject/conflict → Auditor 三镜头 REFUTED 带理由 → STOPPED。屏录。
-- [ ] **完整 backup**:两条路一气呵成(Day 11 晚 / Day 12 晚)。
-- [ ] 录屏里演**手机实时批 pact**(亮点);现场 live 用预批 pact 求稳。
+> 现场脑策略(2026-06-11 定):**hero=预录真脑,现场 live=stub**。攻击路 backup 不依赖网关,随时可录。
+> 录制前全程开 `HERMES_VERBOSE=1`,让评委看到 PLAN 调查 + AUDIT 研判的「为什么」。
+
+- [ ] **真脑 hero 片段**(正常路):`HERMES_VERBOSE=1 HERMES_BRAIN=gpt-5.5 HERMES_CAW=real HERMES_GATE=real uv run hermes-auditor`
+      → allow:真脑面板 → 手机弹批这一笔 → 真转账 → 打开 etherscan。**终端拉宽 ≥140 列**(真脑理由长,保 box 边框齐)。
+- [ ] **攻击路片段**(stub,不依赖网关):`HERMES_VERBOSE=1 uv run hermes-auditor`
+      → reject:三镜头 REFUTED 带理由 + 三红旗 → STOPPED;conflict:挑出合法地址、标记 attacker → ALLOW。
+- [ ] **完整 backup**:两条路一气呵成(Day 11 晚 / Day 12 晚,Day 13 不押)。
+- [ ] 录屏里演**手机实时批「这一笔」**(单闸亮点,比批 pact 更强);现场 live 用 stub 求稳。
+
+### 录制前提自检(2026-06-11 复核 · ✅ 已通)
+
+| 项 | 状态 |
+|---|---|
+| always_review pact `91860633` | `active` |
+| gas `SETH` | 0.0188(够多笔)|
+| token `SETH_USDC1` | 0.005 ≈ **5 笔**;hero 一次吃 2 笔(allow+conflict)→ 反复重录 2-3 个 take 后补:`caw faucet deposit --address <agent钱包> --token-id SETH_USDC1` |
+| 脑网关 | 不稳(连挂两天)→ hero 趁通时抢录;现场跑 stub 不依赖它 |
 
 ## 兜底切换
 
-- 网关抽风 → `HERMES_BRAIN=stub`(控制流一样,理由变模板)。
-- 真转账翻车 → 放上面录好的 backup 录屏 + etherscan 链接。
+- 网关抽风 → 现场本就跑 `HERMES_BRAIN=stub`(控制流一样,理由变模板);误用真脑挂了 → 屏上 `⚠ 回退 stub` 是诚实叙事。
+- 真转账翻车 / 手机批延迟 → 放预录 hero 录屏 + etherscan 链接;现场 live 只演攻击路(stub,纯本地,秒出)。
