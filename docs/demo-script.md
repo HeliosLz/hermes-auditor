@@ -27,15 +27,18 @@
 
 ## 评委会看到什么(两条路)
 
-### 路 A · 正常采购 → 真上链(happy path,必须演)
+### 路 A · 自主采购(发现→比价→审计当闸)→ 真上链(happy path,必须演)
 
 ```
-任务:用不超过 0.01 SETH_USDC1 采购一个 demo 数据源
-  → PLAN 多源查证:官方 docs + 白名单 互相印证同一地址 ✅
-  → Auditor 出可读 risk_summary,checks 全过 ✅
-  → 真人在 Cobo 手机批「这一笔」(HUMAN_GATE = 单闸,always_review)✅
+任务:用不超过 0.01 SETH_USDC1 采购完成分析任务所需的一个数据 API
+  → 发现 3 个候选 vendor,自报价不同 ✅
+  → 比价(便宜优先):最便宜的 CheapData(0.0008)收款地址来自注入论坛帖 ✅
+  → Auditor 当闸:CheapData 来源不可信 → 拦下;落到次便宜且可信的官方 Demo Data API(0.001)✅
+  → 可读 risk_summary,checks 全过 → 真人 Cobo 手机批「这一笔」(单闸,always_review)✅
   → CAW 真上链 → 真 Sepolia tx hash → etherscan 可点 ✅
 ```
+
+> **判决句**:笨 agent 选最便宜 → 被注入地址骗;**Hermes 选「最便宜且通过审计的」** → 审计是采购决策的胜负手,不是旁挂的一步。这把 track 03「自主发现/比价/采购」的完整流程和差异化(审计)焊在了一起。
 
 ### 路 B · 注入攻击 → 可逆区被拦(differentiator,核心)
 
@@ -64,8 +67,8 @@
 | 时间 | 说什么 | 屏幕上跑什么 | 状态 |
 |---|---|---|---|
 | 0:00–0:30 | **问题**:Agent 自主动钱 = 把私钥交给一个会被骗、会被注入的东西。Hermes 在它碰钱前插一道带理由的审计。 | 架构图(复用已做 HTML:defense-in-depth)| ✅ |
-| 0:30–2:15 | **路 A 正常**:Agent 要采购,Auditor 多源查证、给 risk_summary,真人手机批,CAW 真上链。强调「真人看得懂为什么放行」。 | **预录真脑 hero 片段**:`HERMES_VERBOSE=1 BRAIN=gpt-5.5 CAW=real GATE=real allow` → PLAN/AUDIT 面板 → 手机弹批 → 真 tx → 打开 etherscan | ✅ |
-| 2:15–4:00 | **路 B 攻击**:同样任务,混进注入源。看 Auditor 怎么在可逆区抓住、给出每一镜头的「为什么」。 | **现场 live(stub)**:`HERMES_VERBOSE=1 reject` → PLAN 面板打出 fan-out 冲突 + 三镜头 REFUTED 理由 + 三红旗 → STOPPED | ✅ |
+| 0:30–2:15 | **路 A 自主采购**:Agent 发现 3 候选、比价,最便宜的是注入骗子,Auditor 当闸拦下、落到官方 vendor,真人手机批,CAW 真上链。强调「审计是采购胜负手」+「真人看得懂为什么放行」。 | **预录真脑 hero**:`bash scripts/record-hero.sh`(= `VERBOSE=1 BRAIN=gpt-5.5 CAW=real GATE=real uv run hermes-auditor procurement`)→ 比价表 → PLAN/AUDIT 面板 → 手机弹批一次 → 真 tx → etherscan | ✅ |
+| 2:15–4:00 | **路 B 攻击**:同样任务,混进注入源。看 Auditor 怎么在可逆区抓住、给出每一镜头的「为什么」。 | **现场 live(stub)**:`bash scripts/record-attack.sh`(= `VERBOSE=1 uv run hermes-auditor reject conflict`)→ reject 三镜头 REFUTED 理由+三红旗→STOPPED;conflict 挑出合法地址 | ✅ |
 | 4:00–4:45 | **纵深防御**:Auditor 是第一道(可逆区、带原因);CAW policy 是最后一道(broadcast 前硬拦,6.06 已证 `ADDRESS_NOT_WHITELISTED`)。坏地址被拦两次。 | defense-in-depth 图 + 6.06 拦截证据截图 | ✅ |
 | 4:45–5:00 | **收口**:Hermes = 坐在 CAW 之上、会解释的审计层。把创造性交给可逆区,把不可逆交给确定性边界 + 真人手机闸。 | 一句话 slide | — |
 

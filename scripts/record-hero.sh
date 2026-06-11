@@ -6,7 +6,8 @@
 #
 #   bash scripts/record-hero.sh
 #
-# 注意:allow + conflict 两条路 → 手机会**弹两次批准**,各批一次。reject 路不弹。
+# hero = 采购场景(procurement):发现 3 候选 → 比价 → 审计拦下最便宜的注入骗子 →
+#        选官方 vendor → 手机批**一次** → 真上链。一笔交易,一次手机批。
 
 set -u
 CAW=/Users/gffive/.local/bin/caw
@@ -50,18 +51,19 @@ def walk(x):
     return o
 bals={ (b.get('token_id') or b.get('token')): float(b.get('balance') or b.get('amount') or b.get('value') or 0) for b in walk(json.load(sys.stdin)) }
 usdc=bals.get('SETH_USDC1',0); seth=bals.get('SETH',0)
-print(f'  {\"✅\" if usdc>=0.002 else \"⚠️ \"} token SETH_USDC1 = {usdc} (hero 吃 2 笔=0.002;不足补:caw faucet deposit --token-id SETH_USDC1)')
-print(f'  {\"✅\" if seth>=0.002 else \"⚠️ \"} gas   SETH       = {seth}')
+print(f'  {\"✅\" if usdc>=0.001 else \"⚠️ \"} token SETH_USDC1 = {usdc} (hero 吃 1 笔=0.001;不足补:caw faucet deposit --token-id SETH_USDC1)')
+print(f'  {\"✅\" if seth>=0.001 else \"⚠️ \"} gas   SETH       = {seth}')
 " 2>/dev/null || echo "  ⚠️  余额读取失败"
 
 echo "───────────────────────────────────────────────────────"
 echo "  开录提示:① 开屏录  ② 浏览器留一个 sepolia.etherscan.io 标签"
-echo "           ③ 手机解锁、Cobo App 待命 —— **会弹两次批准(allow+conflict)**"
+echo "           ③ 手机解锁、Cobo App 待命 —— **会弹一次批准**(选中的官方 vendor)"
 [ "$warn" -eq 1 ] && echo "  ⚠️  上面有警告,确认可接受再继续。"
 echo "───────────────────────────────────────────────────────"
 read -r -p "  按 Enter 开始(Ctrl-C 取消)... " _
 
-HERMES_VERBOSE=1 HERMES_BRAIN=gpt-5.5 HERMES_CAW=real HERMES_GATE=real uv run hermes-auditor
+# hero = procurement 一条:发现→比价→审计当闸→选官方 vendor→手机批一次→真上链
+HERMES_VERBOSE=1 HERMES_BRAIN=gpt-5.5 HERMES_CAW=real HERMES_GATE=real uv run hermes-auditor procurement
 
 echo "═══════════════════════════════════════════════════════"
 echo " 录完。把上面整段 + etherscan 截图存进 backup;tx hash 回填 demo-evidence.md。"
