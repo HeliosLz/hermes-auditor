@@ -11,10 +11,14 @@
 - HERMES_BRAIN=stub|gpt-5.5   agent 脑
 - HERMES_CAW=stub|real        上链执行(real 含 Cobo 手机批等待,owner 终端跑)
 - HERMES_GATE=stub|real       人闸展示(real: interrupt 暂停,打印 Auditor 判断后续跑)
+
+呈现开关(不改控制流):
+- HERMES_VERBOSE=1            demo 模式:浮出 PLAN 可逆区调查 + AUDIT 风险研判的「为什么」
 """
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 from langgraph.checkpoint.memory import MemorySaver
@@ -23,6 +27,8 @@ from langgraph.types import Command
 from .fixtures_io import load_plan_input
 from .graph import build_graph
 from .state import HermesState
+
+VERBOSE = os.getenv("HERMES_VERBOSE", "") not in ("", "0", "false", "no")
 
 
 def _print_gate_payload(payload: dict[str, Any]) -> None:
@@ -43,6 +49,42 @@ def _print_gate_payload(payload: dict[str, Any]) -> None:
     print("  └─ 单闸:绑定批准在 Cobo 手机 App —— 续跑提交,等手机弹批 " + "─" * 8)
 
 
+def _print_plan_panel(final: HermesState) -> None:
+    """PLAN · 可逆区调查:浮出 fan-out 每源 + synthesize + adversarial 每镜头的「为什么」。
+
+    内容全来自 dynamic_workflow_trace(pipeline 写的),这里只是分组打印,不重算。
+    """
+    trace = final.get("dynamic_workflow_trace") or []
+    ev = final.get("plan_evidence") or {}
+    print("\n  ┌─ PLAN · 可逆区调查(fan-out + 对抗验证)" + "─" * 22)
+    for line in trace:
+        # trace 行形如 [fan-out] / [synthesize] / [adversarial:lens] / [assemble] / [brain]
+        # ⚠ 只标真问题:被反驳的镜头,或 fan-out 上的 ⚠injection 标记(不是「injection 这个词」)
+        marker = "✗" if "REFUTED" in line else ("⚠" if "⚠injection" in line else " ")
+        print(f"  │ {marker} {line}")
+    # 脑溯源:这次判断是谁做的(回退不静默 = 可审计底线)
+    if ev.get("brain") and ev.get("brain") != "stub":
+        fb, calls = ev.get("brain_fallbacks", 0), ev.get("brain_calls", 0)
+        tag = f"⚠ {fb}/{calls} 次回退 stub(网关失败)" if fb else f"全真脑 {calls} 次"
+        print(f"  │   [脑] brain={ev['brain']} · {tag}")
+    print("  └" + "─" * 50)
+
+
+def _print_audit_panel(final: HermesState) -> None:
+    """AUDIT · 风险研判:浮出 risk_summary 的 checks / red_flags / 决策 —— 让评委看到「为什么放行/拦」。"""
+    rs = final.get("risk_summary") or {}
+    checks = rs.get("checks") or {}
+    print("\n  ┌─ AUDIT · 风险研判(risk_summary)" + "─" * 27)
+    for k, v in checks.items():
+        print(f"  │ {'✓' if v else '✗'} {k}")
+    for f in rs.get("red_flags") or []:
+        sev = f.get("severity")
+        if sev and sev != "none":
+            print(f"  │ ⚠ [{sev}] {f.get('message')}")
+    print(f"  │ → decision: {rs.get('decision')}")
+    print("  └" + "─" * 50)
+
+
 def _run_one(graph, run_id: str, scenario: str) -> HermesState:
     plan_input = load_plan_input(scenario)
     initial: HermesState = {"run_id": run_id, "plan_input": plan_input, "audit_log": []}
@@ -51,10 +93,21 @@ def _run_one(graph, run_id: str, scenario: str) -> HermesState:
     print(f"\n=== RUN {run_id}  (plan-sources/{scenario}) ===")
     # 跑 → 遇 interrupt(HERMES_GATE=real)打印 Auditor 判断 → resume 续跑。
     final: HermesState = graph.invoke(initial, config)
+    if VERBOSE:
+        _print_plan_panel(final)  # PLAN 调查永远先打(每 run 必有)
+
+    audit_panel_shown = False
     while "__interrupt__" in final:
+        if VERBOSE and not audit_panel_shown:
+            _print_audit_panel(final)  # 闸前让评委先看到「为什么放行」
+            audit_panel_shown = True
         for intr in final["__interrupt__"]:
             _print_gate_payload(intr.value)
         final = graph.invoke(Command(resume={"ack": True}), config)
+
+    # gate=stub(无 interrupt)/ reject 路(不到闸):AUDIT 面板在这里补打
+    if VERBOSE and not audit_panel_shown:
+        _print_audit_panel(final)
 
     for i, entry in enumerate(final["audit_log"], 1):
         print(f"  {i}. [{entry['node']}] {entry['detail']}")
