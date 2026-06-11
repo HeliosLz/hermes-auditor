@@ -342,3 +342,40 @@ demo 作战图的最后一条硬腿。至此**真 CAW + 真人闸都接进了 La
 1. 明天额度重置后全真脑重跑:`HERMES_BRAIN=gpt-5.5 HERMES_CAW=real HERMES_GATE=real uv run hermes-auditor` → allow 路真 tx + 三场景全绿(完整彩排素材,手机弹两次)。
 2. demo day 上台前 ping 网关验额度(`eval_brain.py`);额度是单点,回退 + ⚠ 标记是兜底叙事。
 3. 录 backup(正常路 + 攻击路),更新 demo-script 反映单闸流程。
+
+## 2026-06-11 · Day 11 — 呈现层:demo-friendly 输出 + 现场脑策略定案 ✅
+
+硬腿昨晚全完成,今天起不加能力、只做「能不能演」。demo day(6.14)剩今明两个工作日(Day 13 owner 不在)。
+
+### 现场脑策略定案:预录真脑 hero + 现场 stub
+
+开工 ping 脑网关连挂两天(6-10 额度 429 → 6-11 upstream error)→ 它是 live demo 唯一单点。决策:
+- **Hero 片段 = 预录真脑**(gpt-5.5 端到端,happy-path 高潮)。
+- **现场 live = stub 脑**:控制流与真脑**完全一致**(终态/拦截/放行都一样),不依赖网关,稳。
+- **回退透明化(Day 6 三续做的)= 把网关风险从翻车点变叙事**:即便误用真脑且网关挂,屏上诚实打 `⚠ N/M 回退 stub`。
+- 解锁:今天的活**全部不被网关卡住**(现场跑 stub);真脑 hero 降级成异步抢录。
+
+### P1 · `HERMES_VERBOSE=1` demo 输出(`a4a48cb`)
+
+terse audit_log 看不到「为什么」→ verbose 浮出评委能扫读的面板,**内容全来自已存在的 `dynamic_workflow_trace`/`risk_summary`,只分组打印,不改控制流**:
+- PLAN 面板:fan-out 每源(地址/来源/可信度/注入)+ synthesize + adversarial 每镜头 REFUTED/pass+理由 + 脑溯源。
+- AUDIT 面板:checks 逐项 ✓/✗ + red_flags + decision。
+- ⚠ 只标真问题(REFUTED / fan-out ⚠injection),pass 行干净;gate=real 时闸前打 AUDIT 面板。
+- reject 路最有说服力:3 镜头 REFUTED 带理由 + 3 条 high 红旗 → REJECT。
+
+### P2 · demo-script 对齐现实(`4b0dbc8`)
+
+脚本早于昨晚单闸工作,三处脱节全修:三硬腿翻牌 🔌→✅;补单闸/手机批/always_review money shot +「人在哪批」问答;现场脑策略成节;分镜重排(路A=预录 hero,路B=现场 stub);兜底表重写(现场本就 stub,网关不再单点);链上证据表(conflict 手机批 tx)。
+
+### P3 · 真脑面板预览(验排版,省额度)
+
+网关下午恢复。只跑 allow 一条 + stub CAW(不动钱)验真脑 verbose 面板:
+- ALLOW 正确,`全真脑 6 次` 无回退。
+- 真脑理由是长自由文本(比 stub 模板有说服力,适合 hero);录制注意:**终端 ≥140 列**保 box 边框齐。
+
+### 剩(纯呈现)
+
+- [ ] 抢录真脑 hero 片段(`VERBOSE=1 BRAIN=gpt-5.5 CAW=real GATE=real`,≥140 列,手机弹两次)。
+- [ ] 录现场攻击路 backup(`VERBOSE=1` stub,不依赖网关,随时)。
+- [ ] README/slides + 排练 5 分钟。
+- [ ] 上台前 ping 网关(`eval_brain.py`);现场跑 stub 不依赖它,hero 片段要它。
