@@ -20,6 +20,7 @@ from langgraph.types import interrupt
 
 from . import caw
 from .plan import llm as plan_llm
+from .plan.discovery import discover_vendors
 from .plan import plan_dynamic_workflow as _run_plan_pipeline
 from .plan import procure_dynamic_workflow as _run_procure_pipeline
 from .plan.types import Source, Vendor
@@ -43,13 +44,24 @@ def _log(node: str, detail: str) -> dict[str, Any]:
 def plan_dynamic_workflow(state: HermesState) -> dict[str, Any]:
     """PLAN_DYNAMIC_WORKFLOW：可逆区 fan-out + adversarial。
 
-    两种输入,自动分流(都产出同款 PlanResult,交给 AUDIT):
+    三种输入,自动分流(都产出同款 PlanResult,交给 AUDIT):
+    - `facets`(staged marketplace)→ 先 discover 候选,再走采购比价线。
     - `vendors`(采购目录)→ 比价×审计:发现候选 → 比价(便宜优先,审计当闸)→ 赢家完整对抗。
     - `sources`(单 vendor 材料)→ 原单 vendor 路:多源查地址 → synthesize → adversarial。
     规则:全程 quarantine(subagent 无动钱工具),不调用 CAW,不标记已批准。
     """
     pin = state["plan_input"]
-    if "vendors" in pin:
+    if "facets" in pin:
+        vendors, discovery_trace = discover_vendors(pin["user_intent"], pin["facets"])
+        result = _run_procure_pipeline(
+            user_intent=pin["user_intent"],
+            vendors=vendors,
+            pact_allowlist=tuple(pin["pact_allowlist"]),
+            payment_template=pin["payment_template"],
+            budget_limit=pin["payment_template"].get("budget_limit", "0"),
+        )
+        result.trace = discovery_trace + result.trace
+    elif "vendors" in pin:
         vendors = [
             Vendor(v["name"], v["price"], [Source(s["label"], s["source_type"], s["doc"]) for s in v["sources"]])
             for v in pin["vendors"]
