@@ -6,8 +6,9 @@
 #
 #   bash scripts/record-hero.sh
 #
-# hero = 采购场景(procurement):发现 3 候选 → 比价 → 审计拦下最便宜的注入骗子 →
-#        选官方 vendor → 手机批**一次** → 真上链。一笔交易,一次手机批。
+# hero = 发现场景(discovery):fan-out 搜索×3 面挖出 3 候选(注入诱饵原文上屏)→
+#        比价 → 审计拦下最便宜的注入骗子 → 选官方 vendor → 手机批**一次** → 真上链。
+#        一笔交易,一次手机批。"自主发现/比价/采购"三个词全部屏上可见。
 
 set -u
 CAW=/Users/gffive/.local/bin/caw
@@ -32,7 +33,7 @@ else
   echo "  ⚠️  脑网关不可用 → 会回退 stub(屏上会显示 ⚠ 回退,但 hero 就不是真脑了)。等网关恢复再录。"; warn=1
 fi
 
-# 3) pact active + 钱包余额(token 够 2 笔:allow+conflict)
+# 3) pact active + 钱包余额(hero 吃 1 笔:discovery 赢家 0.001)
 $CAW status >/dev/null 2>&1 && $CAW pact show --pact-id "$PACT" 2>/dev/null | python3 -c "
 import sys,json
 d=json.load(sys.stdin)
@@ -62,8 +63,8 @@ echo "           ③ 手机解锁、Cobo App 待命 —— **会弹一次批准*
 echo "───────────────────────────────────────────────────────"
 read -r -p "  按 Enter 开始(Ctrl-C 取消)... " _
 
-# hero = procurement 一条:发现→比价→审计当闸→选官方 vendor→手机批一次→真上链
-HERMES_VERBOSE=1 HERMES_BRAIN=gpt-5.5 HERMES_CAW=real HERMES_GATE=real uv run hermes-auditor procurement
+# hero = discovery 一条:fan-out 搜索发现→比价→审计当闸→选官方 vendor→手机批一次→真上链
+HERMES_VERBOSE=1 HERMES_BRAIN=gpt-5.5 HERMES_CAW=real HERMES_GATE=real uv run hermes-auditor discovery
 
 echo "═══════════════════════════════════════════════════════"
 echo " 录完。把上面整段 + etherscan 截图存进 backup;tx hash 回填 demo-evidence.md。"
