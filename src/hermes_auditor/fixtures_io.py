@@ -22,6 +22,11 @@ _PLAN_INPUT_REQUIRED = ("user_intent", "pact_allowlist", "payment_template", "so
 _SOURCE_REQUIRED = ("label", "source_type", "doc")
 _PROCUREMENT_REQUIRED = ("user_intent", "pact_allowlist", "payment_template", "vendors")
 _VENDOR_REQUIRED = ("name", "price", "sources")
+_MARKETPLACE_REQUIRED = ("user_intent", "pact_allowlist", "payment_template", "facets")
+_FACET_REQUIRED = ("facet", "source_type", "corpus")
+# 与 plan/types.py 的 SourceType 对齐:source_type 是信任标签,坏值要等到审计阶段
+# 查 _CONFIDENCE_BY_SOURCE 表时才炸,必须在 load 时挡住。
+_SOURCE_TYPES = ("official_docs", "registry", "user_input", "web_untrusted", "unknown")
 
 
 def _load_schema() -> dict[str, Any]:
@@ -85,5 +90,26 @@ def load_procurement_input(name: str) -> dict[str, Any]:
             sbad = [k for k in _SOURCE_REQUIRED if k not in src]
             if sbad:
                 raise ValueError(f"procurement {filename} vendors[{i}].sources[{j}] 缺字段: {sbad}")
+
+    return data
+
+
+def load_marketplace_input(name: str) -> dict[str, Any]:
+    """读取一个 discovery-输入 fixture(staged marketplace)并做最小结构校验。"""
+    filename = name if name.endswith(".json") else f"{name}.json"
+    data = json.loads((_PLAN_SOURCE_DIR / filename).read_text(encoding="utf-8"))
+
+    missing = [k for k in _MARKETPLACE_REQUIRED if k not in data]
+    if missing:
+        raise ValueError(f"marketplace {filename} 缺字段: {missing}")
+    for i, facet in enumerate(data["facets"]):
+        bad = [k for k in _FACET_REQUIRED if k not in facet]
+        if bad:
+            raise ValueError(f"marketplace {filename} facets[{i}] 缺字段: {bad}")
+        if facet["source_type"] not in _SOURCE_TYPES:
+            raise ValueError(
+                f"marketplace {filename} facets[{i}] source_type 非法: "
+                f"{facet['source_type']!r},允许 {_SOURCE_TYPES}"
+            )
 
     return data
