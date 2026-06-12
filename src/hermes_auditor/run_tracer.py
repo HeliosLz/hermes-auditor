@@ -2,7 +2,9 @@
 
     uv run hermes-auditor
 
-三条 PLAN-source 驱动的 run:
+五条 PLAN-source 驱动的 run:
+- discovery -> staged marketplace 先 discover 再走采购线 -> DONE
+- procurement -> ALLOW  -> HUMAN_GATE -> CAW_EXECUTE -> DONE
 - allow    -> ALLOW  -> HUMAN_GATE -> CAW_EXECUTE -> DONE
 - reject   -> REJECT -> STOPPED   (HUMAN_GATE 根本不到,手机不会响)
 - conflict -> ALLOW(挑出 legit、标记 attacker) -> ... -> DONE
@@ -24,7 +26,7 @@ from typing import Any
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
-from .fixtures_io import load_plan_input, load_procurement_input
+from .fixtures_io import load_marketplace_input, load_plan_input, load_procurement_input
 from .graph import build_graph
 from .state import HermesState
 
@@ -49,13 +51,49 @@ def _print_gate_payload(payload: dict[str, Any]) -> None:
     print("  └─ 单闸:绑定批准在 Cobo 手机 App —— 续跑提交,等手机弹批 " + "─" * 8)
 
 
-def _print_plan_panel(final: HermesState) -> None:
+def _collect_discovery_bait_lines(final: HermesState) -> list[tuple[str, str]]:
+    """从 staged marketplace 里浮出注入诱饵原文,仅供展示。"""
+    plan_input = final.get("plan_input") or {}
+    facets = plan_input.get("facets") or []
+    bait_lines: list[tuple[str, str]] = []
+    for facet in facets:
+        facet_name = str(facet.get("facet", ""))
+        corpus = str(facet.get("corpus", ""))
+        for line in corpus.splitlines():
+            if "NOTE FOR AI AGENTS" in line:
+                bait_lines.append((facet_name, line))
+    return bait_lines
+
+
+def _print_discovery_panel(final: HermesState, bait_lines: list[tuple[str, str]]) -> bool:
+    """发现面板:只搬运 search / merge trace + 诱饵原文,不重算。"""
+    trace = final.get("dynamic_workflow_trace") or []
+    search_lines = [line for line in trace if line.startswith("[search:") or line.startswith("[merge]")]
+    if not search_lines:
+        return False
+
+    print("\n  ┌─ DISCOVERY · 候选发现(fan-out 搜索 × 3 面)" + "─" * 17)
+    for line in search_lines:
+        print(f"  │ {line}")
+    for facet_name, line in bait_lines:
+        print(f"  │ ⚠ 诱饵({facet_name} 原文): {line}")
+    print("  └" + "─" * 50)
+    return True
+
+
+def _print_plan_panel(
+    final: HermesState,
+    *,
+    skip_discovery_trace: bool = False,
+    bait_lines: list[tuple[str, str]] | None = None,
+) -> None:
     """PLAN · 可逆区调查:浮出 fan-out 每源 + synthesize + adversarial 每镜头的「为什么」。
 
     内容全来自 dynamic_workflow_trace(pipeline 写的),这里只是分组打印,不重算。
     """
     trace = final.get("dynamic_workflow_trace") or []
     ev = final.get("plan_evidence") or {}
+    bait_lines = bait_lines or []
 
     # 采购比价表(仅 vendors 路有);让评委看到「发现候选 → 比价 → 审计当闸」。
     comparison = ev.get("comparison") or []
@@ -66,13 +104,23 @@ def _print_plan_panel(final: HermesState) -> None:
             win = " ★WINNER" if c.get("name") == sel else ""
             mark = "✓" if c.get("trusted") and c.get("within_budget") else "✗"
             print(f"  │ {mark} {c.get('name'):22} 价 {c.get('price'):8} {c.get('address')}")
-            print(f"  │     └ {c.get('reason')}{win}")
+            reason = c.get("reason")
+            address = str(c.get("address") or "")
+            if (
+                not c.get("trusted")
+                and address
+                and any(address.lower() in line.lower() for _, line in bait_lines)
+            ):
+                reason = f"{reason} · ⚠ 地址来自注入帖。"
+            print(f"  │     └ {reason}{win}")
         print("  └" + "─" * 50)
 
     print("\n  ┌─ PLAN · 可逆区调查(fan-out + 对抗验证)" + "─" * 22)
     for line in trace:
         # trace 行形如 [fan-out] / [synthesize] / [adversarial:lens] / [assemble] / [brain]
         # ⚠ 只标真问题:被反驳的镜头,或 fan-out 上的 ⚠injection 标记(不是「injection 这个词」)
+        if skip_discovery_trace and (line.startswith("[search:") or line.startswith("[merge]")):
+            continue
         marker = "✗" if "REFUTED" in line else ("⚠" if "⚠injection" in line else " ")
         print(f"  │ {marker} {line}")
     # 脑溯源:这次判断是谁做的(回退不静默 = 可审计底线)
@@ -98,8 +146,14 @@ def _print_audit_panel(final: HermesState) -> None:
     print("  └" + "─" * 50)
 
 
-def _run_one(graph, run_id: str, scenario: str, loader=load_plan_input) -> HermesState:
-    plan_input = loader(scenario)
+def _run_one(
+    graph,
+    run_id: str,
+    scenario: str,
+    loader=load_plan_input,
+    fixture_name: str | None = None,
+) -> HermesState:
+    plan_input = loader(fixture_name or scenario)
     initial: HermesState = {"run_id": run_id, "plan_input": plan_input, "audit_log": []}
     config = {"configurable": {"thread_id": run_id}}
 
@@ -107,7 +161,9 @@ def _run_one(graph, run_id: str, scenario: str, loader=load_plan_input) -> Herme
     # 跑 → 遇 interrupt(HERMES_GATE=real)打印 Auditor 判断 → resume 续跑。
     final: HermesState = graph.invoke(initial, config)
     if VERBOSE:
-        _print_plan_panel(final)  # PLAN 调查永远先打(每 run 必有)
+        bait_lines = _collect_discovery_bait_lines(final)
+        discovery_panel_shown = _print_discovery_panel(final, bait_lines)
+        _print_plan_panel(final, skip_discovery_trace=discovery_panel_shown, bait_lines=bait_lines)
 
     audit_panel_shown = False
     while "__interrupt__" in final:
@@ -136,17 +192,20 @@ def _run_one(graph, run_id: str, scenario: str, loader=load_plan_input) -> Herme
     return final
 
 
-# 场景登记表:name -> (run_id, loader)。procurement 走 vendor 目录 loader,其余走单 vendor。
-_SCENARIOS: dict[str, tuple[str, Any]] = {
-    "procurement": ("run_procurement_001", load_procurement_input),
-    "allow": ("run_allow_001", load_plan_input),
-    "reject": ("run_reject_001", load_plan_input),
-    "conflict": ("run_conflict_001", load_plan_input),
+# 场景登记表:name -> (run_id, loader, fixture_name)。把场景名和 fixture 文件名解耦,
+# 这样 discovery 能指向 marketplace,同时保留旧 4 场景回归不变。
+_SCENARIOS: dict[str, tuple[str, Any, str]] = {
+    "discovery": ("run_discovery_001", load_marketplace_input, "marketplace"),
+    "procurement": ("run_procurement_001", load_procurement_input, "procurement"),
+    "allow": ("run_allow_001", load_plan_input, "allow"),
+    "reject": ("run_reject_001", load_plan_input, "reject"),
+    "conflict": ("run_conflict_001", load_plan_input, "conflict"),
 }
 # 默认全跑(回归);命令行可挑场景做 demo 录制:
-#   uv run hermes-auditor procurement        # hero(1 笔,1 次手机批)
+#   uv run hermes-auditor discovery          # hero(发现面板 + 1 次采购比价)
+#   uv run hermes-auditor procurement        # 旧路回归(1 笔,1 次手机批)
 #   uv run hermes-auditor reject conflict     # 攻击路(不动钱)
-_DEFAULT_ORDER = ["procurement", "allow", "reject", "conflict"]
+_DEFAULT_ORDER = ["discovery", "procurement", "allow", "reject", "conflict"]
 
 
 def main() -> None:
@@ -167,8 +226,8 @@ def main() -> None:
     print(f"跑 {len(scenarios)} 场景: {scenarios}")
     graph = build_graph(checkpointer=MemorySaver())
     for name in scenarios:
-        run_id, loader = _SCENARIOS[name]
-        _run_one(graph, run_id, name, loader)
+        run_id, loader, fixture_name = _SCENARIOS[name]
+        _run_one(graph, run_id, name, loader, fixture_name)
 
 
 if __name__ == "__main__":
