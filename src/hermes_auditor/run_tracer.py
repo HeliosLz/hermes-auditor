@@ -185,7 +185,7 @@ def _run_one(
             audit_panel_shown = True
         for intr in final["__interrupt__"]:
             _print_gate_payload(intr.value)
-        final = graph.invoke(Command(resume={"ack": True}), config)
+        final = graph.invoke(Command(resume=_gate_decision()), config)
 
     # gate=stub(无 interrupt)/ reject 路(不到闸):AUDIT 面板在这里补打
     if VERBOSE and not audit_panel_shown:
@@ -203,6 +203,26 @@ def _run_one(
         terminal = "STOPPED"
     print(f"  -> terminal: {terminal}  | audit_decision={decision}")
     return final
+
+
+def _gate_decision() -> dict[str, Any]:
+    """interrupt 后收操作员决定:终端里问一句,非交互沿用自动 ack(脚本/录制行为不变)。
+
+    这是操作员闸(可中止);绑定批准仍在 Cobo 手机(CAW=real 时转账还会弹批)。
+    """
+    import sys
+
+    if not sys.stdin.isatty():
+        return {"ack": True}
+    try:
+        ans = input("  执行这笔支付? [y=执行 / n=中止] ").strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        ans = "n"
+    if ans in ("y", "yes", "是"):
+        return {"approved": True}
+    print("  已中止(CAW 未提交)。")
+    return {"approved": False}
 
 
 # 场景登记表:name -> (run_id, loader, fixture_name)。把场景名和 fixture 文件名解耦,
@@ -263,14 +283,14 @@ def main() -> None:
     if not intent:
         print('用法: uv run hermes-auditor "<想采购什么,可带预算>"  |  all  |  场景名')
         sys.exit(2)
-    _interactive_defaults(llm, websearch)
+    _interactive_defaults(llm, websearch, nodes)
     _print_banner(llm, caw, nodes, websearch)
     _warn_if_staged(websearch)
     graph = build_graph(checkpointer=MemorySaver())
     _run_ask(graph, intent, 1)
 
 
-def _interactive_defaults(llm, websearch) -> None:
+def _interactive_defaults(llm, websearch, nodes) -> None:
     """交互/ask 路径的默认值翻真:有人坐在终端前,默认就该是真脑+真搜索+面板。
 
     只在用户**没有显式设置**对应 env 时翻;没有 OPENAI_API_KEY 则留 stub 并明说。
@@ -279,6 +299,8 @@ def _interactive_defaults(llm, websearch) -> None:
     global VERBOSE
     if "HERMES_VERBOSE" not in os.environ:
         VERBOSE = True
+    if "HERMES_GATE" not in os.environ:
+        nodes.GATE = "real"  # 交互模式必须有确认:CAW 提交前在终端问一句,不再静默放行
     has_key = bool(os.environ.get("OPENAI_API_KEY"))
     if not has_key:
         print("(OPENAI_API_KEY 未设置 → 留在 stub 排练模式:不理解需求、不搜真网,只跑本地剧本)")
@@ -355,7 +377,7 @@ def _maybe_escalate_pact(ask_input: dict[str, Any], clamp: dict[str, str], inten
 
 def _repl(llm, caw, nodes, websearch) -> None:
     """交互模式:启动一次,连续发话。每句话一条独立 run;场景名照样能跑回归。"""
-    _interactive_defaults(llm, websearch)
+    _interactive_defaults(llm, websearch, nodes)
     _print_banner(llm, caw, nodes, websearch)
     _warn_if_staged(websearch)
     print('想采购什么直接说(可带预算);场景名跑回归;exit / 空行+Ctrl-D 退出。')
