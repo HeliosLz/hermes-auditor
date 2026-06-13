@@ -10,9 +10,10 @@
 - conflict -> ALLOW(挑出 legit、标记 attacker) -> ... -> DONE
 
 三个接缝开关(默认全 stub,免 token / 免动钱 / 免交互):
-- HERMES_BRAIN=stub|gpt-5.5   agent 脑
-- HERMES_CAW=stub|real        上链执行(real 含 Cobo 手机批等待,owner 终端跑)
-- HERMES_GATE=stub|real       人闸展示(real: interrupt 暂停,打印 Auditor 判断后续跑)
+- HERMES_BRAIN=stub|gpt-5.5       agent 脑
+- HERMES_CAW=stub|real            上链执行(real 含 Cobo 手机批等待,owner 终端跑)
+- HERMES_GATE=stub|real           人闸展示(real: interrupt 暂停,打印 Auditor 判断后续跑)
+- HERMES_DISCOVERY=staged|web     discovery 语料(web: web facet 换实时全网搜索,经网关服务端)
 
 呈现开关(不改控制流):
 - HERMES_VERBOSE=1            demo 模式:浮出 PLAN 可逆区调查 + AUDIT 风险研判的「为什么」
@@ -26,7 +27,12 @@ from typing import Any
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
-from .fixtures_io import load_marketplace_input, load_plan_input, load_procurement_input
+from .fixtures_io import (
+    build_ask_input,
+    load_marketplace_input,
+    load_plan_input,
+    load_procurement_input,
+)
 from .graph import build_graph
 from .state import HermesState
 
@@ -52,7 +58,14 @@ def _print_gate_payload(payload: dict[str, Any]) -> None:
 
 
 def _collect_discovery_bait_lines(final: HermesState) -> list[tuple[str, str]]:
-    """从 staged marketplace 里浮出注入诱饵原文,仅供展示。"""
+    """从 staged marketplace 里浮出注入诱饵原文,仅供展示。
+
+    live web 模式下 web facet 的 staged 语料已被换掉,再展示 staged 诱饵就是误导 —— 跳过。
+    """
+    from .plan import websearch
+
+    if websearch.use_web():
+        return []
     plan_input = final.get("plan_input") or {}
     facets = plan_input.get("facets") or []
     bait_lines: list[tuple[str, str]] = []
@@ -208,26 +221,115 @@ _SCENARIOS: dict[str, tuple[str, Any, str]] = {
 _DEFAULT_ORDER = ["discovery", "procurement", "allow", "reject", "conflict"]
 
 
+def _print_banner(llm, caw, nodes, websearch) -> None:
+    print(f"brain = {llm.BRAIN}" + ("" if llm.use_model() else "  (确定性 stub,免 token)"))
+    print(f"caw   = {caw.CAW}" + ("  (真上链+手机批 · owner 终端跑)" if caw.use_real() else "  (canned tx,免动钱)"))
+    print(f"gate  = {nodes.GATE}" + ("  (interrupt 暂停,展示 Auditor 判断)" if nodes.GATE != "stub" else "  (自动批准,免交互)"))
+    print(f"disco = {websearch.DISCOVERY}" + ("  (web facet 实时全网搜索,经网关)" if websearch.use_web() else "  (staged 语料,零网络)"))
+
+
 def main() -> None:
     import sys
 
     from . import caw, nodes
-    from .plan import llm
+    from .plan import llm, websearch
 
-    picked = [a for a in sys.argv[1:] if a in _SCENARIOS]
-    scenarios = picked or _DEFAULT_ORDER
-    if [a for a in sys.argv[1:] if a not in _SCENARIOS]:
-        bad = [a for a in sys.argv[1:] if a not in _SCENARIOS]
-        print(f"(忽略未知场景 {bad};可选: {list(_SCENARIOS)})")
+    args = sys.argv[1:]
+    if args and args[0] == "ask":  # 旧 `ask` 前缀兼容
+        args = args[1:] or [""]
 
-    print(f"brain = {llm.BRAIN}" + ("" if llm.use_model() else "  (确定性 stub,免 token)"))
-    print(f"caw   = {caw.CAW}" + ("  (真上链+手机批 · owner 终端跑)" if caw.use_real() else "  (canned tx,免动钱)"))
-    print(f"gate  = {nodes.GATE}" + ("  (interrupt 暂停,展示 Auditor 判断)" if nodes.GATE != "stub" else "  (自动批准,免交互)"))
-    print(f"跑 {len(scenarios)} 场景: {scenarios}")
+    # 入口分派:
+    #   无参数 + 终端     → REPL(启动一次,像聊天一样连续发话)
+    #   无参数 + 管道/脚本 → 全量回归(CI / 旧脚本行为不变)
+    #   all / 场景名       → 回归指定场景
+    #   其他               → 整句当用户的话,跑一条 run
+    if not args and sys.stdin.isatty():
+        _repl(llm, caw, nodes, websearch)
+        return
+
+    if args == ["all"] or not args or all(a in _SCENARIOS for a in args):
+        scenarios = _DEFAULT_ORDER if (not args or args == ["all"]) else args
+        _print_banner(llm, caw, nodes, websearch)
+        print(f"跑 {len(scenarios)} 场景: {scenarios}")
+        graph = build_graph(checkpointer=MemorySaver())
+        for name in scenarios:
+            run_id, loader, fixture_name = _SCENARIOS[name]
+            _run_one(graph, run_id, name, loader, fixture_name)
+        return
+
+    intent = " ".join(args).strip()
+    if not intent:
+        print('用法: uv run hermes-auditor "<想采购什么,可带预算>"  |  all  |  场景名')
+        sys.exit(2)
+    _interactive_defaults(llm, websearch)
+    _print_banner(llm, caw, nodes, websearch)
+    _warn_if_staged(websearch)
     graph = build_graph(checkpointer=MemorySaver())
-    for name in scenarios:
-        run_id, loader, fixture_name = _SCENARIOS[name]
-        _run_one(graph, run_id, name, loader, fixture_name)
+    _run_ask(graph, intent, 1)
+
+
+def _interactive_defaults(llm, websearch) -> None:
+    """交互/ask 路径的默认值翻真:有人坐在终端前,默认就该是真脑+真搜索+面板。
+
+    只在用户**没有显式设置**对应 env 时翻;没有 OPENAI_API_KEY 则留 stub 并明说。
+    回归路径(all/场景名/管道)不经过这里,默认仍全 stub。钱(CAW)/人闸不在此列。
+    """
+    global VERBOSE
+    if "HERMES_VERBOSE" not in os.environ:
+        VERBOSE = True
+    has_key = bool(os.environ.get("OPENAI_API_KEY"))
+    if not has_key:
+        print("(OPENAI_API_KEY 未设置 → 留在 stub 排练模式:不理解需求、不搜真网,只跑本地剧本)")
+        return
+    if "HERMES_BRAIN" not in os.environ:
+        llm.BRAIN = "gpt-5.5"
+    if "HERMES_DISCOVERY" not in os.environ:
+        websearch.DISCOVERY = "web"
+
+
+def _warn_if_staged(websearch) -> None:
+    if not websearch.use_web():
+        print("(提示: HERMES_DISCOVERY=staged → web facet 无语料,候选只有本地 registry/official;真全网搜索加 HERMES_DISCOVERY=web)")
+
+
+def _run_ask(graph, intent: str, seq: int) -> None:
+    """一句话 = 一条独立 run(独立 thread_id,审计日志互不串)。"""
+    ask_input = build_ask_input(intent)
+    print(f"intent = {intent!r}  budget_limit = {ask_input['payment_template']['budget_limit']}")
+    clamp = ask_input.pop("_budget_clamped", None)
+    if clamp:
+        print(
+            f"  ⚠ 你要的预算 {clamp['asked']} 超过 pact 策略上限 {clamp['ceiling']},"
+            f"按 {clamp['ceiling']} 执行(策略只能收紧,不能被一句话放宽)"
+        )
+    _run_one(graph, f"run_ask_{seq:03d}", "ask", lambda _name: ask_input, "ask")
+
+
+def _repl(llm, caw, nodes, websearch) -> None:
+    """交互模式:启动一次,连续发话。每句话一条独立 run;场景名照样能跑回归。"""
+    _interactive_defaults(llm, websearch)
+    _print_banner(llm, caw, nodes, websearch)
+    _warn_if_staged(websearch)
+    print('想采购什么直接说(可带预算);场景名跑回归;exit / 空行+Ctrl-D 退出。')
+    graph = build_graph(checkpointer=MemorySaver())
+    seq = 0
+    while True:
+        try:
+            line = input("\nhermes> ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if not line:
+            continue
+        if line.lower() in ("exit", "quit", "q"):
+            return
+        if line in _SCENARIOS:
+            seq += 1
+            run_id, loader, fixture_name = _SCENARIOS[line]
+            _run_one(graph, f"{run_id}_repl{seq}", line, loader, fixture_name)
+            continue
+        seq += 1
+        _run_ask(graph, line, seq)
 
 
 if __name__ == "__main__":

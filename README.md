@@ -31,8 +31,9 @@ AI × Web3 Agentic Builders Hackathon 参赛项目（主攻 Cobo 赛道）。
 ## 运行
 
 ```bash
-uv run hermes-auditor                          # stub 脑（确定性，免 token）
-HERMES_BRAIN=gpt-5.5 uv run hermes-auditor     # 真脑（gpt-5.5，经 ai.input.im 网关）
+uv run hermes-auditor                          # 交互模式：直接说想采购什么(有 OPENAI_API_KEY 时默认真脑+真全网搜索+面板)
+uv run hermes-auditor all                      # 全量回归 5 场景（stub 脑，确定性，免 token）
+HERMES_BRAIN=gpt-5.5 uv run hermes-auditor all # 真脑（gpt-5.5，经 ai.input.im 网关）
 ```
 
 跑三条 PLAN-source 驱动的 run（整图 `PLAN → AUDIT → HUMAN_GATE → CAW_EXECUTE`），打印 `audit_log` 和终态：
@@ -41,7 +42,26 @@ HERMES_BRAIN=gpt-5.5 uv run hermes-auditor     # 真脑（gpt-5.5，经 ai.input
 - `reject`（只有不可信注入源，无权威）→ `AUDIT(REJECT) → STOPPED`
 - `conflict`（官方 + 注入攻击源）→ 挑出 legit、标记 attacker → `AUDIT(ALLOW) → DONE`
 
-脑接缝 `plan/llm.py`：`HERMES_BRAIN=stub`（默认，免 token）| `gpt-5.5`（真脑，经 OpenAI 兼容网关）；真脑调用失败自动回退 stub（live demo 兜底）。`CAW_EXECUTE` / `HUMAN_GATE` 当前仍 stub —— 真 CAW 是 demo Day 11 的活。
+脑接缝 `plan/llm.py`：`HERMES_BRAIN=stub`（默认，免 token）| `gpt-5.5`（真脑，经 OpenAI 兼容网关）；真脑调用失败自动回退 stub（live demo 兜底）。
+
+discovery 接缝 `plan/websearch.py`：`HERMES_DISCOVERY=staged`（默认，零网络）| `web`（真全网搜索：web facet 语料换成 gpt-5.5 服务端 `web_search` 拉回的实时报价，本地零出网；registry/official 仍走 staged —— 权威来源不上公网，收款地址永远不能只凭网页确立）。失败回退 staged 并留痕。
+
+```bash
+HERMES_DISCOVERY=web HERMES_BRAIN=gpt-5.5 HERMES_VERBOSE=1 uv run hermes-auditor discovery   # 真全网比价(staged 场景)
+HERMES_DISCOVERY=web HERMES_BRAIN=gpt-5.5 HERMES_VERBOSE=1 \
+  uv run hermes-auditor "我想采购一个链上数据 API,预算 0.005"                                  # 自然语言驱动整图
+```
+
+自然语言入口:参数命中场景名跑回归,否则整句当用户的话。用户的话只提供 intent + 预算(预算与 pact 上限取较小者 —— 能收紧不能放宽);信任锚(`pact_allowlist`、registry/official 语料)从 curated 配置加载,不接受运行时改写。「想要什么」是不可信输入,「钱能打给谁」是预先固化的策略,两者永远不在同一通道。
+
+嫌前缀长可以装成全局命令或加 alias:
+
+```bash
+uv tool install --editable .        # 之后直接: hermes-auditor "采购一个数据 API"
+# 或 alias hermes='uv run --project <仓库路径> hermes-auditor'
+```
+
+`CAW_EXECUTE` / `HUMAN_GATE` 默认仍 stub（`HERMES_CAW=real` / `HERMES_GATE=real` 由 owner 终端开）。
 
 进度见 [PROGRESS.md](./PROGRESS.md)。
 LangGraph 骨架见 [docs/langgraph-skeleton.md](./docs/langgraph-skeleton.md)。

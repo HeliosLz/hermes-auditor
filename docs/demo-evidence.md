@@ -18,7 +18,7 @@
 | Etherscan | https://sepolia.etherscan.io/tx/0x4832568957d87c7c9c7abd616aef2e1693dbc052809c589f66b5306fa0e83141 |
 | 状态 | `Success` · **人闸 = owner 手机批「这一笔」**(非 pact 级一次性授权)|
 | 时间线 | 提交 12:54:34 → 手机弹批 → owner 12:54:58 批准 → 上链 `Success` |
-| 复跑 | `HERMES_CAW=real HERMES_GATE=real uv run hermes-auditor`(owner 终端;allow+conflict 各弹一次手机批)|
+| 复跑 | `HERMES_CAW=real HERMES_GATE=real uv run hermes-auditor all`(owner 终端;allow+conflict 各弹一次手机批)|
 
 > **叙事要点**:pact 级手机批(下方旧 pact)= 批一次授权、范围内自动执行;**单闸每笔手机批 = 每一笔不可逆付款都过 owner 的手**。后者才是 demo 该讲的故事——评委更买"每笔过人手"。
 
@@ -35,7 +35,7 @@
 
 ### 整图一条龙真上链(全图驱动,同 `834f22c8` 内)
 
-`HERMES_CAW=real uv run hermes-auditor` —— 由 PLAN→AUDIT→HUMAN_GATE→CAW_EXECUTE **全图驱动**真转账(不再是独立 caw 脚本)。
+`HERMES_CAW=real uv run hermes-auditor all` —— 由 PLAN→AUDIT→HUMAN_GATE→CAW_EXECUTE **全图驱动**真转账(不再是独立 caw 脚本)。
 
 | 路 | 终态 | Tx Hash |
 |---|---|---|
@@ -62,16 +62,16 @@
 | 日期 | 2026-06-09 / 06-10 |
 | 工具 | `eval_brain.py`(gpt-5.5)+ 06-09 Claude 9-subagent workflow |
 | 结果 | 攻击地址 **3/3 REFUTED**、合法地址 control **0/3 误伤** |
-| 整图 | `HERMES_BRAIN=gpt-5.5 uv run hermes-auditor`:reject→STOPPED(带每镜头理由)|
+| 整图 | `HERMES_BRAIN=gpt-5.5 uv run hermes-auditor all`:reject→STOPPED(带每镜头理由)|
 
 ## ⬜ 待录 backup(增量,别押 Day 13)
 
 > 现场脑策略(2026-06-11 定):**hero=预录真脑,现场 live=stub**。攻击路 backup 不依赖网关,随时可录。
 > 录制前全程开 `HERMES_VERBOSE=1`,让评委看到 PLAN 调查 + AUDIT 研判的「为什么」。
 
-- [ ] **真脑 hero 片段**(正常路):`HERMES_VERBOSE=1 HERMES_BRAIN=gpt-5.5 HERMES_CAW=real HERMES_GATE=real uv run hermes-auditor`
+- [ ] **真脑 hero 片段**(正常路):`HERMES_VERBOSE=1 HERMES_BRAIN=gpt-5.5 HERMES_CAW=real HERMES_GATE=real uv run hermes-auditor all`
       → allow:真脑面板 → 手机弹批这一笔 → 真转账 → 打开 etherscan。**终端拉宽 ≥140 列**(真脑理由长,保 box 边框齐)。
-- [ ] **攻击路片段**(stub,不依赖网关):`HERMES_VERBOSE=1 uv run hermes-auditor`
+- [ ] **攻击路片段**(stub,不依赖网关):`HERMES_VERBOSE=1 uv run hermes-auditor all`
       → reject:三镜头 REFUTED 带理由 + 三红旗 → STOPPED;conflict:挑出合法地址、标记 attacker → ALLOW。
 - [ ] **完整 backup**:两条路一气呵成(Day 11 晚 / Day 12 晚,Day 13 不押)。
 - [ ] 录屏里演**手机实时批「这一笔」**(单闸亮点,比批 pact 更强);现场 live 用 stub 求稳。
