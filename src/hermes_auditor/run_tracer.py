@@ -224,6 +224,8 @@ _DEFAULT_ORDER = ["discovery", "procurement", "allow", "reject", "conflict"]
 def _print_banner(llm, caw, nodes, websearch) -> None:
     print(f"brain = {llm.BRAIN}" + ("" if llm.use_model() else "  (确定性 stub,免 token)"))
     print(f"caw   = {caw.CAW}" + ("  (真上链+手机批 · owner 终端跑)" if caw.use_real() else "  (canned tx,免动钱)"))
+    if caw.PACT != caw.CAW:
+        print(f"pact  = {caw.PACT}" + ("  (提案真提交 CAW,owner 手机批;转账仍 stub)" if caw.PACT != "stub" else "  (提案模拟批准)"))
     print(f"gate  = {nodes.GATE}" + ("  (interrupt 暂停,展示 Auditor 判断)" if nodes.GATE != "stub" else "  (自动批准,免交互)"))
     print(f"disco = {websearch.DISCOVERY}" + ("  (web facet 实时全网搜索,经网关)" if websearch.use_web() else "  (staged 语料,零网络)"))
 

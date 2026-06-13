@@ -36,6 +36,9 @@ from typing import Any
 from uuid import uuid4
 
 CAW = os.getenv("HERMES_CAW", "stub")
+# pact 提案与转账解耦:提案不动钱(批准权在 owner 手机),可以单独真。
+# 默认跟随 HERMES_CAW(real 全真语义不变);HERMES_PACT=real 可只真提案、转账仍 stub。
+PACT = os.getenv("HERMES_PACT", CAW)
 
 _CAW_BIN = os.getenv("HERMES_CAW_BIN", "/Users/gffive/.local/bin/caw")
 # 默认 = always_review 的 demo pact(每笔 owner 手机批;2026-06-17 过期)。
@@ -280,7 +283,7 @@ def propose_budget_pact(
 
     获批(active)时调用方应 `set_active_pact(pact_id)` 再继续;FAILED 一律按原上限走。
     """
-    if use_real():
+    if PACT != "stub":
         return _real_propose_pact(asked, intent, allowlist, token_id)
     return _stub_propose_pact(asked, intent)
 
