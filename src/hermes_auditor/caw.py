@@ -62,9 +62,11 @@ _PENDING_POLL_MAX_TRIES = int(os.getenv("HERMES_PENDING_POLL_TRIES", "60"))
 _TERMINAL_OK = {"Success", "Completed"}
 _TERMINAL_FAIL = {"Failed", "Rejected"}
 
-# caw pending get 的 .status:owner 在 Cobo App 的决定。
-_PENDING_APPROVED = {"approved", "Approved"}
-_PENDING_REJECTED = {"rejected", "Rejected"}
+# caw pending get 的 .status:owner 在 Cobo App 的决定(归一化小写后匹配)。
+# 实测:批准后状态会走到 `executed`(approval 已执行)—— 文档状态表未列,曾导致误判超时。
+# 故 approved/executed/completed/success 都算「已批准」;拿不准时仍以链上 tx_get 为最终真相。
+_PENDING_APPROVED = {"approved", "executed", "completed", "success"}
+_PENDING_REJECTED = {"rejected", "denied", "cancelled", "canceled"}
 
 
 def use_real() -> bool:
@@ -100,30 +102,55 @@ def _extract_pending_operation_id(stdout: str) -> str | None:
     return None
 
 
-def _wait_for_owner_approval(operation_id: str, request_id: str) -> dict[str, Any]:
-    """轮询 `caw pending get` 等 owner 在 Cobo App 里批/拒这一笔。
+def _tx_status(request_id: str) -> tuple[str, dict[str, Any]]:
+    """读一次 `caw tx get --request-id`,返回 (status, record);读不到 → ("", {})。"""
+    try:
+        got = _run(["tx", "get", "--request-id", request_id], _GET_TIMEOUT_S)
+        if got.returncode == 0 and got.stdout.strip():
+            rec = json.loads(got.stdout)
+            if isinstance(rec, dict):
+                return str(rec.get("status", "")), rec
+    except Exception:
+        pass
+    return "", {}
 
-    返回 {status: approved} 或 BLOCKED/FAILED 错误 dict(可直接当 execute_transfer 结果)。
+
+def _wait_for_owner_approval(operation_id: str, request_id: str) -> dict[str, Any]:
+    """等 owner 在 Cobo App 批/拒这一笔。
+
+    钱的真相 = 链上 `caw tx get`(批准后转账一旦上链/失败,这里最权威,不赌 pending 词汇);
+    `caw pending get` 状态作辅助(抓显式拒绝 + 进度)。返回 {status: approved} 或 BLOCKED/FAILED。
     """
     print(f"  [CAW] PendingApproval — 等 owner 在 Cobo App 批准这一笔 (operation_id={operation_id})")
     last_status = "pending"
     for _ in range(_PENDING_POLL_MAX_TRIES):
+        # 1) 链上真相优先:批准后转账确认/失败都从这里读,免被 pending 状态词汇坑(executed 事故)。
+        tx_status, _ = _tx_status(request_id)
+        if tx_status in _TERMINAL_OK:
+            print(f"  [CAW] 转账已确认上链(owner 已批,tx status={tx_status})")
+            return {"status": "approved"}
+        if tx_status in _TERMINAL_FAIL:
+            return {
+                "status": "FAILED",
+                "reason": f"owner 批后转账终态 {tx_status};未成功上链",
+                "request_id": request_id,
+                "pending_operation_id": operation_id,
+            }
+
+        # 2) pending 状态:抓显式批/拒(executed 也算批),并显示进度。
         try:
             got = _run(["pending", "get", "--operation-id", operation_id], _GET_TIMEOUT_S)
-        except Exception:
-            time.sleep(_PENDING_POLL_INTERVAL_S)
-            continue
-        if got.returncode == 0 and got.stdout.strip():
-            try:
+            if got.returncode == 0 and got.stdout.strip():
                 record = json.loads(got.stdout)
                 inner = record.get("result") if isinstance(record.get("result"), dict) else record
                 last_status = inner.get("status", last_status)
-            except json.JSONDecodeError:
-                pass
-        if last_status in _PENDING_APPROVED:
-            print("  [CAW] owner 已批准 — 等上链")
+        except Exception:
+            pass
+        norm = str(last_status).strip().lower()
+        if norm in _PENDING_APPROVED:
+            print(f"  [CAW] owner 已批准(pending={last_status})— 等上链确认")
             return {"status": "approved"}
-        if last_status in _PENDING_REJECTED:
+        if norm in _PENDING_REJECTED:
             print("  [CAW] owner 已拒绝")
             return {
                 "status": "FAILED",
@@ -137,7 +164,7 @@ def _wait_for_owner_approval(operation_id: str, request_id: str) -> dict[str, An
         "status": "BLOCKED",
         "reason": (
             f"等 owner 批准超时({_PENDING_POLL_MAX_TRIES}×{_PENDING_POLL_INTERVAL_S}s),"
-            f"最后 status={last_status};未批准,未上链"
+            f"最后 pending={last_status};未确认上链"
         ),
         "request_id": request_id,
         "pending_operation_id": operation_id,
