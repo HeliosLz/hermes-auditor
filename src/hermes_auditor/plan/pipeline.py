@@ -222,10 +222,10 @@ def procure_dynamic_workflow(
     for e in sorted(evals, key=lambda e: _price(e["vendor"].price)):
         v = e["vendor"]
         within = _price(v.price) <= budget
-        if not within:
-            note = "超预算"
-        elif not e["trusted"]:
+        if not e["trusted"]:  # 可信问题优先于预算:价格不可解析时 within=False,报「超预算」是误导
             note = e["reason"]
+        elif not within:
+            note = "超预算"
         elif winner_eval is not None and e is winner_eval:
             note = "最便宜且可信 → 选中"
         else:

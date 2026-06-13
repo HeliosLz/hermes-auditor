@@ -33,6 +33,26 @@ def _client():
     return OpenAI(base_url=_BASE_URL)
 
 
+def complete_with_web_search(instructions: str, user: str) -> str:
+    """调真脑 + 服务端 web_search 工具,返回纯文本。失败抛异常(由调用方决定 fallback)。
+
+    搜索发生在网关/模型服务端,本进程零出网;该调用只带 web_search 一个工具,
+    动钱工具物理不存在(quarantine 同款落地)。
+    """
+    r = _client().responses.create(
+        model=_MODEL,
+        instructions=instructions,
+        input=user,
+        tools=[{"type": "web_search"}],
+        reasoning={"effort": "low"},
+        max_output_tokens=4000,
+    )
+    txt = (r.output_text or "").strip()
+    if not txt:
+        raise ValueError("web_search 调用未返回文本")
+    return txt
+
+
 def complete_json(instructions: str, user: str) -> dict[str, Any]:
     """调真脑,返回解析后的 JSON dict。失败抛异常(由调用方决定 fallback)。"""
     r = _client().responses.create(

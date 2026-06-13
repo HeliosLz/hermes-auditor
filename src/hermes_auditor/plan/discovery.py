@@ -1,7 +1,12 @@
-"""PLAN discovery: fan-out 搜索 staged marketplace 语料 -> 代码层合并 -> 产出 vendors。
+"""PLAN discovery: fan-out 搜索 marketplace 语料 -> 代码层合并 -> 产出 vendors。
 
 这个层只负责「发现候选」,不碰 pipeline 的比价 / 审计结构。
 stub 路径完全确定性、零网络;真脑接缝仿 agents.py,失败回退后打 FALLBACK_MARK。
+
+语料来源由 websearch.py 的 `HERMES_DISCOVERY=staged|web` 决定:web 模式下
+`web_untrusted` facet 换成实时搜索拉回的语料,其余 facet 仍走 staged(权威来源不上公网)。
+vendor 记录允许 pay-to 缺失(`n/a`)—— 真实网页报价多数没有链上地址;无地址候选
+进比价表但被判「无可用地址 → 不可信」,永远选不中,只提供价格参照。
 """
 
 from __future__ import annotations
@@ -9,12 +14,12 @@ from __future__ import annotations
 import re
 from typing import Any
 
-from . import agents, llm
+from . import agents, llm, websearch
 from .types import Source, SourceType, Vendor
 
 _ADDR_RE = re.compile(r"0x[a-fA-F0-9]{40}")
 _VENDOR_LINE_RE = re.compile(
-    r"^vendor:\s*(?P<name>[^|]+?)\s*\|\s*price:\s*(?P<price>[^|]+?)\s*\|\s*pay-to:\s*(?P<address>0x[a-fA-F0-9]{40})\b.*$",
+    r"^vendor:\s*(?P<name>[^|]+?)\s*\|\s*price:\s*(?P<price>[^|]+?)\s*\|\s*pay-to:\s*(?P<address>0x[a-fA-F0-9]{40}|n/a)\b.*$",
     re.IGNORECASE,
 )
 
@@ -49,7 +54,6 @@ def _vendor_hits_from_corpus(corpus: str, facet: str, source_type: SourceType) -
             continue
         name = m.group("name").strip()
         price = m.group("price").strip()
-        address = m.group("address").strip()
         doc = _context_doc(lines, idx)
         vendors.append(
             Vendor(
@@ -106,7 +110,8 @@ def _stub_search_agent(facet: str, source_type: SourceType, corpus: str) -> list
 def _model_search_agent(facet: str, source_type: SourceType, intent: str, corpus: str) -> list[Vendor]:
     instructions = (
         "你是 Hermes PLAN 的搜索 subagent。只看给你的这一份语料,抽取 vendor 列表。"
-        "你没有任何动钱工具。只输出 JSON:{\"vendors\":[{\"name\":\"...\",\"price\":\"...\",\"address\":\"0x...\"}]}"
+        "你没有任何动钱工具。只输出 JSON:{\"vendors\":[{\"name\":\"...\",\"price\":\"...\",\"address\":\"0x... 或空串\"}]}"
+        "address 只在语料原文出现 0x 地址时才填,绝不编造;没有就填空串。"
     )
     user = f"facet: {facet}\nuser_intent: {intent}\ncorpus:\n{corpus}"
     out = llm.complete_json(instructions, user)
@@ -121,8 +126,10 @@ def _model_search_agent(facet: str, source_type: SourceType, intent: str, corpus
         name = str(row.get("name", "")).strip()
         price = str(row.get("price", "")).strip()
         address = str(row.get("address", "")).strip()
-        if not name or not price or not _has_addr(address):
+        if not name or not price:
             raise ValueError("vendor 字段不完整")
+        if address and not _has_addr(address):
+            raise ValueError(f"vendor address 非法(既不是 0x 地址也不是空): {address}")
         vendors.append(
             Vendor(
                 name=name,
@@ -162,6 +169,19 @@ def discover_vendors(intent: str, facets: list[dict[str, Any]]) -> tuple[list[Ve
         facet_name = str(facet["facet"])
         source_type = facet["source_type"]
         corpus = str(facet["corpus"])
+        # live web 接缝:只换 web_untrusted facet 的语料;registry/official 仍走 staged
+        # (权威来源不上公网 —— provenance 分级)。失败回退 staged,留痕不静默。
+        if websearch.use_web() and source_type == "web_untrusted":
+            query = str(facet.get("query") or intent)
+            try:
+                corpus = websearch.fetch_web_corpus(query)
+                trace_lines.append(
+                    f"[search:{facet_name}] live web 语料就绪({len(corpus)} 字,query={query!r})"
+                )
+            except Exception as e:
+                trace_lines.append(
+                    f"[search:{facet_name}] ⚠ [{websearch.WEB_FALLBACK_MARK}: {type(e).__name__}]"
+                )
         batch = run_search_agent(facet_name, source_type, intent, corpus)
         summary = ", ".join(f"{v.name}({v.price})" for v in batch) if batch else "(none)"
         trace_lines.append(f"[search:{facet_name}] 命中 {len(batch)} 家: {summary}")
