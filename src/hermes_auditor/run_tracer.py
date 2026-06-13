@@ -299,10 +299,56 @@ def _run_ask(graph, intent: str, seq: int) -> None:
     clamp = ask_input.pop("_budget_clamped", None)
     if clamp:
         print(
-            f"  ⚠ 你要的预算 {clamp['asked']} 超过 pact 策略上限 {clamp['ceiling']},"
-            f"按 {clamp['ceiling']} 执行(策略只能收紧,不能被一句话放宽)"
+            f"  ⚠ 你要的预算 {clamp['asked']} 超过 pact 策略上限 {clamp['ceiling']}"
+            f"(策略不能被一句话放宽 —— 升预算要 owner 在手机上批新 pact)"
         )
+        if not _maybe_escalate_pact(ask_input, clamp, intent):
+            return
     _run_one(graph, f"run_ask_{seq:03d}", "ask", lambda _name: ask_input, "ask")
+
+
+def _maybe_escalate_pact(ask_input: dict[str, Any], clamp: dict[str, str], intent: str) -> bool:
+    """超预算时问用户怎么办。返回 False = 放弃这条 run。
+
+    升级走 owner 通道:agent 只**提案**新 pact(只升预算,地址仍钉死原 allowlist,
+    单笔仍 always_review),批准发生在 owner 的 Cobo App(stub 模式模拟批准)。
+    非交互(管道)不提问,按上限继续 —— 行为与告警一致。
+    """
+    import sys
+
+    from . import caw
+
+    if not sys.stdin.isatty():
+        print(f"    (非交互,按上限 {clamp['ceiling']} 继续)")
+        return True
+    try:
+        choice = input(
+            f"    [回车]按 {clamp['ceiling']} 继续 / [p]提案新 pact 升到 {clamp['asked']}(owner 手机批)/ [n]放弃: "
+        ).strip().lower()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return False
+    if choice == "n":
+        print("    已放弃这条 run。")
+        return False
+    if choice != "p":
+        return True
+
+    res = caw.propose_budget_pact(
+        asked=clamp["asked"],
+        intent=intent,
+        allowlist=tuple(ask_input["pact_allowlist"]),
+        token_id=ask_input["payment_template"].get("token", "SETH_USDC1"),
+    )
+    if res.get("status") == "active":
+        caw.set_active_pact(res["pact_id"])
+        ask_input["payment_template"]["budget_limit"] = clamp["asked"]
+        note = f"({res['note']})" if res.get("note") else "(owner 已在 Cobo App 批准)"
+        print(f"    ✓ 新 pact 生效 pact_id={res['pact_id']} → budget_limit={clamp['asked']} {note}")
+        print("      地址 allowlist 未放宽;单笔仍需手机批(always_review)。")
+    else:
+        print(f"    ✗ 提案未获批:{res.get('reason')} → 按原上限 {clamp['ceiling']} 继续")
+    return True
 
 
 def _repl(llm, caw, nodes, websearch) -> None:

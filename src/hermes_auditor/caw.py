@@ -183,6 +183,108 @@ def _poll_tx(request_id: str, extra: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+# ===== pact 提案(预算升级走 owner 通道)====================================
+# 「想要什么」来自对话,「钱能打给谁/花多少」只能由 owner 在手机上批 —— agent 提案,人批准。
+# 升级只放宽**预算**,不放宽地址(destination 仍钉死在原 allowlist;least privilege)。
+
+# 等 owner 批 pact:人比链慢,沿用 pending 的宽超时。
+_PACT_PENDING = {"pendingapproval", "pending_approval", "pending"}
+
+
+def set_active_pact(pact_id: str) -> None:
+    """提案获批后,把后续 `caw tx transfer` 切到新 pact。"""
+    global _PACT_ID
+    _PACT_ID = pact_id
+
+
+def _stub_propose_pact(asked: str, intent: str) -> dict[str, Any]:
+    return {
+        "status": "active",
+        "pact_id": f"stub-pact-{uuid4().hex[:8]}",
+        "note": "stub:模拟 owner 手机批准(未提交 CAW)",
+    }
+
+
+def _real_propose_pact(asked: str, intent: str, allowlist: tuple[str, ...], token_id: str) -> dict[str, Any]:
+    """`caw pact submit` 提交预算升级提案,轮询 `caw pact show` 等 owner 在 Cobo App 批/拒。"""
+    policies = json.dumps([{
+        "name": f"hermes-budget-escalation-{asked}",
+        "type": "transfer",
+        "rules": {
+            "effect": "allow",
+            "when": {
+                "chain_in": [_CHAIN_ID],
+                "token_in": [{"chain_id": _CHAIN_ID, "token_id": token_id}],
+                "destination_address_in": [
+                    {"chain_id": _CHAIN_ID, "address": a} for a in allowlist
+                ],
+            },
+            "deny_if": {"amount_gt": str(asked)},
+            "always_review": True,  # 升级了预算,每笔仍要手机批 —— 单闸不撤
+        },
+    }])
+    completion = json.dumps([{"type": "tx_count", "threshold": "1"}])
+    plan = (
+        f"# Summary\n按用户需求采购(预算上限 {asked} {token_id})。\n\n"
+        f"# Operations\n- 1 笔 transfer,收款地址限于既有 allowlist({len(allowlist)} 个)\n\n"
+        f"# Risk Controls\n- 单笔上限 {asked}\n- always_review:每笔 owner 手机批\n- 完成 1 笔即自动终止"
+    )
+    try:
+        sub = _run([
+            "pact", "submit",
+            "--name", "Hermes 预算升级",
+            "--intent", f"预算升级到 {asked} {token_id}:{intent[:80]}",
+            "--original-intent", intent[:200],
+            "--policies", policies,
+            "--completion-conditions", completion,
+            "--execution-plan", plan,
+        ], _SUBMIT_TIMEOUT_S)
+    except Exception as e:
+        return {"status": "FAILED", "reason": f"pact submit 子进程异常: {type(e).__name__}: {e}"}
+    if sub.returncode != 0:
+        return {"status": "FAILED", "reason": f"caw pact submit exit={sub.returncode}",
+                "stderr": (sub.stderr or "").strip()[:300]}
+    try:
+        out = json.loads(sub.stdout)
+        inner = out.get("result") if isinstance(out.get("result"), dict) else out
+        pact_id = str(inner.get("pact_id") or "")
+    except (json.JSONDecodeError, AttributeError):
+        pact_id = ""
+    if not pact_id:
+        return {"status": "FAILED", "reason": "pact submit 响应里没有 pact_id",
+                "stdout": (sub.stdout or "").strip()[:300]}
+
+    print(f"  [CAW] pact 提案已提交 — 等 owner 在 Cobo App 批准 (pact_id={pact_id})")
+    last = "pending"
+    for _ in range(_PENDING_POLL_MAX_TRIES):
+        try:
+            got = _run(["pact", "show", "--pact-id", pact_id], _GET_TIMEOUT_S)
+            record = json.loads(got.stdout)
+            inner = record.get("result") if isinstance(record.get("result"), dict) else record
+            last = str(inner.get("status", last))
+        except Exception:
+            pass
+        s = last.replace("-", "_").lower()
+        if s == "active":
+            return {"status": "active", "pact_id": pact_id}
+        if s not in _PACT_PENDING:  # rejected / revoked / expired …
+            return {"status": "FAILED", "reason": f"pact 提案未获批:status={last}", "pact_id": pact_id}
+        time.sleep(_PENDING_POLL_INTERVAL_S)
+    return {"status": "FAILED", "reason": "等 owner 批 pact 超时(未批准)", "pact_id": pact_id}
+
+
+def propose_budget_pact(
+    asked: str, intent: str, allowlist: tuple[str, ...], token_id: str = "SETH_USDC1"
+) -> dict[str, Any]:
+    """预算升级提案。返回 {status: active, pact_id} 或 {status: FAILED, reason}。
+
+    获批(active)时调用方应 `set_active_pact(pact_id)` 再继续;FAILED 一律按原上限走。
+    """
+    if use_real():
+        return _real_propose_pact(asked, intent, allowlist, token_id)
+    return _stub_propose_pact(asked, intent)
+
+
 def execute_transfer(payment_draft: dict[str, Any], run_id: str) -> dict[str, Any]:
     """real:提交 `caw tx transfer`,(若需人批)等 owner 手机批准,再轮询到终态。
 
