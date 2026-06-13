@@ -28,6 +28,7 @@ uv run python eval_brain.py                 # 评估 gpt-5.5 当 agent 脑（注
 | `HERMES_CAW` | `stub` \| `real` | 上链执行（`caw.py`）。**钱不能假装成功**：real 任何失败/超时 → BLOCKED/FAILED，绝不返回假 tx_hash |
 | `HERMES_GATE` | `stub` \| `real` | 人闸（`nodes.py`）。real 用 LangGraph `interrupt` 真暂停 |
 | `HERMES_DISCOVERY` | `staged` \| `web` | discovery 语料（`plan/websearch.py`）。web 模式只换 `web_untrusted` facet 为实时全网搜索（gpt-5.5 服务端 `web_search`，本地零出网）；registry/official 永远走 staged（权威来源不上公网）。失败回退 staged 并留痕 |
+| `HERMES_RESOLVE_CAP` | int（默认 2） | web 模式下「有价无址」候选的第 2 轮专项地址搜索上限（`discovery.resolve_vendor_address`）。深挖搜索但**不降信任门槛**：找到的地址一律 web_untrusted，永不自动获权威背书 → 仍选不中，只从「无可用地址」变「有址但无权威背书」。避免无限循环 |
 
 约束：`HERMES_CAW=real`（`caw tx transfer` 动真钱 + Cobo 手机批）只由 owner 在自己终端跑；agent 开发/测试一律用 stub。
 

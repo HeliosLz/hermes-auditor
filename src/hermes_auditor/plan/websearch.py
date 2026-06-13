@@ -39,7 +39,29 @@ def use_web() -> bool:
     return DISCOVERY == "web"
 
 
+_RESOLVE_INSTRUCTIONS = (
+    "你是 Hermes PLAN 的地址解析 subagent。用 web_search 专门查指定供应商的**官方链上收款地址**"
+    "(USDC / 稳定币 / 钱包地址)。规则:\n"
+    "1. 只找该供应商官方渠道公布的收款地址;\n"
+    "2. 找到就输出一行 `pay-to: 0x... | source: <来源URL>`,忠实摘录,不编造、不推断;\n"
+    "3. 找不到明确的官方链上地址就只回 `NOT FOUND` —— 绝不用论坛/第三方猜测的地址凑数;\n"
+    "4. 不要输出别的。"
+)
+
+
 def fetch_web_corpus(query: str) -> str:
     """经网关 web_search 拉回实时语料。失败抛异常(由调用方回退 staged 并留痕)。"""
     print(f"  … live web 搜索中: {query!r}(gpt-5.5 服务端 web_search,约 20-40s)")
     return llm.complete_with_web_search(_FETCH_INSTRUCTIONS, f"搜索主题: {query}")
+
+
+def fetch_targeted_address(vendor_name: str, intent: str) -> str:
+    """第 2 轮:专项搜某供应商的链上收款地址。失败抛异常(调用方留痕)。
+
+    深挖搜索,不降信任门槛 —— 不管页面自称多官方,出处仍是公网,调用方一律按
+    web_untrusted 盖章(provenance 由工具定,不由模型自称)。
+    """
+    print(f"  … 第2轮专项找地址: {vendor_name!r}(web_search,约 20-40s)")
+    return llm.complete_with_web_search(
+        _RESOLVE_INSTRUCTIONS, f"供应商: {vendor_name}\n采购意图: {intent}"
+    )

@@ -11,11 +11,15 @@ vendor 记录允许 pay-to 缺失(`n/a`)—— 真实网页报价多数没有链
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
 from . import agents, llm, websearch
 from .types import Source, SourceType, Vendor
+
+# 第 2 轮地址解析每轮最多对几家「有价无址」候选深挖(避免无限循环 / 控制延迟)。
+_RESOLVE_CAP = int(os.getenv("HERMES_RESOLVE_CAP", "2"))
 
 _ADDR_RE = re.compile(r"0x[a-fA-F0-9]{40}")
 _VENDOR_LINE_RE = re.compile(
@@ -203,7 +207,54 @@ def discover_vendors(intent: str, facets: list[dict[str, Any]]) -> tuple[list[Ve
                 existing.sources.extend(vendor.sources)
 
     trace_lines.append(f"[merge] 共 {len(merged)} 家候选(去重后)")
+
+    # 第 2 轮:对「有价无址」的候选做专项地址解析(只 web 模式)。
+    # 这是「继续找」—— 但只加深搜索,不降信任门槛:找到的地址一律 web_untrusted,
+    # 公网出处永不自动获得权威背书(provenance 由工具盖章),所以仍选不中,只是
+    # 从「无可用地址」变成「有址但无权威背书」—— agent 真的多找了一轮,闸照样守住。
+    if websearch.use_web():
+        addressless = [v for v in merged if not _vendor_has_address(v)]
+        for v in addressless[:_RESOLVE_CAP]:
+            addr, note = resolve_vendor_address(v.name, intent)
+            if addr:
+                v.sources.append(
+                    Source(
+                        label=f"{v.name}·resolve",
+                        source_type="web_untrusted",
+                        doc=f"专项搜索命中 pay-to {addr}(来源:公网搜索,未经权威背书)",
+                    )
+                )
+                trace_lines.append(
+                    f"[resolve:{v.name}] 第2轮专项找地址 → 命中 {addr}(web_untrusted,无权威背书,仍不可选)"
+                )
+            else:
+                trace_lines.append(f"[resolve:{v.name}] 第2轮专项找地址 → {note}")
+        if len(addressless) > _RESOLVE_CAP:
+            trace_lines.append(
+                f"[resolve] 还有 {len(addressless) - _RESOLVE_CAP} 家未做二轮"
+                f"(本轮上限 {_RESOLVE_CAP},避免无限循环;HERMES_RESOLVE_CAP 可调)"
+            )
+
     return merged, trace_lines
+
+
+def _vendor_has_address(vendor: Vendor) -> bool:
+    return any(_ADDR_RE.search(s.doc) for s in vendor.sources)
+
+
+def resolve_vendor_address(vendor_name: str, intent: str) -> tuple[str | None, str]:
+    """第 2 轮专项地址解析:深挖搜索,不降信任门槛 —— 命中也只算 web_untrusted。
+
+    返回 (地址 | None, 留痕说明)。地址抽取用正则(不靠模型自报),出处由调用方盖 web_untrusted。
+    """
+    try:
+        corpus = websearch.fetch_targeted_address(vendor_name, intent)
+    except Exception as e:
+        return None, f"[{websearch.WEB_FALLBACK_MARK}: {type(e).__name__}]"
+    m = _ADDR_RE.search(corpus)
+    if m:
+        return m.group(0), ""
+    return None, "未找到官方链上收款地址(拒绝用论坛/第三方猜测凑数)"
 
 
 def _print_vendor(vendor: Vendor) -> None:
